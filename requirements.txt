@@ -1,0 +1,11 @@
+# MCP服务器依赖
+mcp>=1.0.0
+
+# Python标准库（无需安装）
+# - pathlib: 文件路径操作
+# - imaplib: IMAP协议
+# - smtplib: SMTP协议
+# - email: 邮件解析和构建
+# - argparse: 命令行参数解析
+# - datetime: 日期时间处理
+# - re: 正则表达式
