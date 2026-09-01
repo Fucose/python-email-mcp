@@ -1,0 +1,21 @@
+{
+  "name": "fucose-plugins",
+  "interface": {
+    "displayName": "Fucose Plugins"
+  },
+  "plugins": [
+    {
+      "name": "python-email-mcp",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/Fucose/python-email-mcp.git",
+        "ref": "v0.1.0"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

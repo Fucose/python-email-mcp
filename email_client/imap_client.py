@@ -2,12 +2,16 @@
 
 import imaplib
 import email
+import logging
 from email.header import decode_header
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from .models import Email, Attachment, EmailSearchParams
+from .errors import AuthenticationError, NotFoundError, TransportError
+from .models import Email, Attachment
+
+LOGGER = logging.getLogger(__name__)
 
 
 class IMAPClient:
@@ -39,23 +43,36 @@ class IMAPClient:
             bool: 是否成功连接
         """
         try:
-            if self.ssl:
-                self.client = imaplib.IMAP4_SSL(self.host, self.port)
-            else:
-                self.client = imaplib.IMAP4(self.host, self.port)
+            client_class = imaplib.IMAP4_SSL if self.ssl else imaplib.IMAP4
+            self.client = client_class(self.host, self.port)
+        except (OSError, imaplib.IMAP4.error) as exc:
+            self.client = None
+            raise TransportError(f"Unable to connect to IMAP server: {exc}") from exc
 
+        try:
             self.client.login(self.user, self.password)
-            self.client.select('INBOX')
-            return True
-        except Exception as e:
-            print(f"✗ IMAP连接失败: {e}")
-            return False
+        except imaplib.IMAP4.error as exc:
+            self.disconnect()
+            raise AuthenticationError("IMAP authentication failed") from exc
+
+        try:
+            status, _ = self.client.select('INBOX')
+            if status != 'OK':
+                raise TransportError("IMAP server did not select INBOX")
+        except Exception:
+            self.disconnect()
+            raise
+        return True
 
     def disconnect(self):
         """断开IMAP连接"""
         if self.client:
             try:
-                self.client.close()
+                if getattr(self.client, "state", None) == "SELECTED":
+                    self.client.close()
+            except Exception:
+                pass
+            try:
                 self.client.logout()
             except Exception:
                 pass
@@ -73,8 +90,7 @@ class IMAPClient:
             List[Email]: 邮件列表
         """
         if not self.client:
-            if not self.connect():
-                return []
+            self.connect()
 
         try:
             # 计算日期范围
@@ -83,7 +99,7 @@ class IMAPClient:
             # 使用 UID 搜索邮件（获取真实 UID）
             status, messages = self.client.uid('SEARCH', None, f'(SINCE {since_date})')
             if status != 'OK':
-                return []
+                raise TransportError("IMAP search failed")
 
             email_uids = messages[0].split()
 
@@ -98,9 +114,10 @@ class IMAPClient:
 
             return emails
 
-        except Exception as e:
-            print(f"✗ 获取邮件列表失败: {e}")
-            return []
+        except (AuthenticationError, TransportError):
+            raise
+        except Exception as exc:
+            raise TransportError(f"Unable to list email: {exc}") from exc
 
     def search_by_subject(self, keyword: str, days: int = 7) -> List[Email]:
         """
@@ -114,17 +131,19 @@ class IMAPClient:
             List[Email]: 匹配的邮件列表
         """
         if not self.client:
-            if not self.connect():
-                return []
+            self.connect()
 
         try:
             # 计算日期范围
             since_date = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
 
             # 使用 UID 搜索邮件
-            status, messages = self.client.uid('SEARCH', None, f'(SUBJECT "{keyword}" SINCE {since_date})')
+            escaped_keyword = keyword.replace('\\', '\\\\').replace('"', '\\"')
+            status, messages = self.client.uid(
+                'SEARCH', None, f'(SUBJECT "{escaped_keyword}" SINCE {since_date})'
+            )
             if status != 'OK':
-                return []
+                raise TransportError("IMAP subject search failed")
 
             email_uids = messages[0].split()
 
@@ -136,9 +155,10 @@ class IMAPClient:
 
             return emails
 
-        except Exception as e:
-            print(f"✗ 搜索邮件失败: {e}")
-            return []
+        except (AuthenticationError, TransportError):
+            raise
+        except Exception as exc:
+            raise TransportError(f"Unable to search email: {exc}") from exc
 
     def get_email_content(self, uid: str) -> Optional[Email]:
         """
@@ -151,14 +171,14 @@ class IMAPClient:
             Optional[Email]: 邮件对象，失败返回None
         """
         if not self.client:
-            if not self.connect():
-                return None
+            self.connect()
 
         try:
             return self._fetch_email_by_uid(uid, full=True)
-        except Exception as e:
-            print(f"✗ 获取邮件内容失败: {e}")
-            return None
+        except (AuthenticationError, TransportError):
+            raise
+        except Exception as exc:
+            raise TransportError(f"Unable to read email: {exc}") from exc
 
     def download_attachments(self, uid: str, folder: Path) -> List[Path]:
         """
@@ -172,8 +192,7 @@ class IMAPClient:
             List[Path]: 下载的文件路径列表
         """
         if not self.client:
-            if not self.connect():
-                return []
+            self.connect()
 
         # 创建下载文件夹
         folder.mkdir(parents=True, exist_ok=True)
@@ -182,7 +201,7 @@ class IMAPClient:
             # 使用 UID 获取邮件
             status, msg_data = self.client.uid('FETCH', uid, '(RFC822)')
             if status != 'OK':
-                return []
+                raise NotFoundError(f"Email UID {uid} was not found")
 
             # 解析邮件
             raw_email = msg_data[0][1]
@@ -202,7 +221,9 @@ class IMAPClient:
 
                 if filename:
                     # 解码文件名
-                    filename = self._decode_str(filename)
+                    filename = Path(self._decode_str(filename).replace('\\', '/')).name
+                    if not filename:
+                        filename = "attachment"
 
                     # 保存附件
                     file_path = folder / filename
@@ -223,9 +244,10 @@ class IMAPClient:
 
             return downloaded_files
 
-        except Exception as e:
-            print(f"✗ 下载附件失败: {e}")
-            return []
+        except (AuthenticationError, NotFoundError, TransportError):
+            raise
+        except Exception as exc:
+            raise TransportError(f"Unable to download attachments: {exc}") from exc
 
     def batch_download_attachments(self, uids: List[str], folder: Path) -> List[Path]:
         """
@@ -305,8 +327,8 @@ class IMAPClient:
 
             return email_obj
 
-        except Exception as e:
-            print(f"✗ 解析邮件失败: {e}")
+        except Exception as exc:
+            LOGGER.warning("Unable to parse email UID %s: %s", email_uid, exc)
             return None
 
     def _extract_body_and_attachments(self, msg, email_obj: Email):
@@ -358,9 +380,8 @@ class IMAPClient:
                             if isinstance(subpart, str):
                                 email_obj.body = subpart
                                 break
-                except Exception as e:
-                    print(f"Debug: text/plain decode error: {e}")
-                    pass
+                except Exception as exc:
+                    LOGGER.debug("Unable to decode text/plain email part: %s", exc)
 
             elif content_type == "text/html" and not email_obj.html_body:
                 try:
@@ -379,9 +400,8 @@ class IMAPClient:
                             if isinstance(subpart, str):
                                 email_obj.html_body = subpart
                                 break
-                except Exception as e:
-                    print(f"Debug: text/html decode error: {e}")
-                    pass
+                except Exception as exc:
+                    LOGGER.debug("Unable to decode text/html email part: %s", exc)
 
         email_obj.attachments = attachments
 

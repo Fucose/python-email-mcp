@@ -1,28 +1,83 @@
-"""配置管理模块"""
+"""Per-user configuration management for Windows, WSL, and Linux."""
 
+from __future__ import annotations
+
+import logging
 import os
+import stat
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
+
+from .errors import ConfigurationError
+
+LOGGER = logging.getLogger(__name__)
+
+SETUP_COMMAND = (
+    'uvx --from "git+https://github.com/Fucose/python-email-mcp.git@v0.1.0" '
+    "python-email-mcp cli setup"
+)
+
+FIELD_ENV_KEYS = {
+    "email": "EMAIL_USER",
+    "password": "EMAIL_PASSWORD",
+    "imap_host": "EMAIL_IMAP_HOST",
+    "imap_port": "EMAIL_IMAP_PORT",
+    "imap_ssl": "EMAIL_IMAP_SSL",
+    "smtp_host": "EMAIL_SMTP_HOST",
+    "smtp_port": "EMAIL_SMTP_PORT",
+    "smtp_ssl": "EMAIL_SMTP_SSL",
+}
+
+
+def get_default_config_dir(
+    *,
+    environ: Optional[Mapping[str, str]] = None,
+    platform_name: Optional[str] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    """Return the external per-user config directory without creating it."""
+    env = os.environ if environ is None else environ
+    override = env.get("EMAIL_MCP_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+
+    platform_name = os.name if platform_name is None else platform_name
+    user_home = Path.home() if home is None else Path(home)
+    if platform_name == "nt":
+        appdata = env.get("APPDATA", "").strip()
+        base = Path(appdata).expanduser() if appdata else user_home / "AppData" / "Roaming"
+    else:
+        xdg_config_home = env.get("XDG_CONFIG_HOME", "").strip()
+        base = Path(xdg_config_home).expanduser() if xdg_config_home else user_home / ".config"
+    return base / "python-email-mcp"
+
+
+def get_default_download_dir(*, home: Optional[Path] = None) -> Path:
+    """Return the default attachment directory outside the plugin cache."""
+    user_home = Path.home() if home is None else Path(home)
+    return user_home / "Downloads" / "python-email-mcp"
 
 
 class Config:
-    """配置管理类"""
+    """Load environment-over-file settings and save a restricted config file."""
 
-    def __init__(self, config_dir: Optional[Path] = None):
-        """
-        初始化配置
+    def __init__(
+        self,
+        config_dir: Optional[Path] = None,
+        *,
+        environ: Optional[Mapping[str, str]] = None,
+        platform_name: Optional[str] = None,
+        home: Optional[Path] = None,
+    ):
+        self._environ = os.environ if environ is None else environ
+        self.config_dir = Path(config_dir) if config_dir is not None else get_default_config_dir(
+            environ=self._environ,
+            platform_name=platform_name,
+            home=home,
+        )
+        self.env_file = self.config_dir / "config.env"
+        self.signature_file = self.config_dir / "signature.txt"
 
-        Args:
-            config_dir: 配置文件所在目录，默认为当前目录
-        """
-        if config_dir is None:
-            # 默认使用main.py所在目录
-            config_dir = Path(__file__).parent.parent
-        self.config_dir = Path(config_dir)
-        self.env_file = self.config_dir / '.env'
-        self.signature_file = self.config_dir / 'signature.txt'
-
-        # 配置项
         self.email: Optional[str] = None
         self.password: Optional[str] = None
         self.imap_host: Optional[str] = None
@@ -31,211 +86,155 @@ class Config:
         self.smtp_host: Optional[str] = None
         self.smtp_port: Optional[int] = None
         self.smtp_ssl: Optional[bool] = None
-        self.signature: Optional[str] = None
 
     def load_config(self) -> bool:
-        """
-        从环境变量和.env文件加载配置
-        优先使用环境变量，环境变量未设置时才从.env文件读取
-
-        Returns:
-            bool: 是否成功加载
-        """
-        # 辅助函数：从环境变量或字符串值获取配置
-        def get_config(key, parser=None):
-            env_value = os.getenv(key)
-            if env_value is not None:
-                return parser(env_value) if parser else env_value
-            return None
-
-        # 优先从环境变量读取
-        self.email = get_config('EMAIL_USER')
-        self.password = get_config('EMAIL_PASSWORD')
-        self.imap_host = get_config('EMAIL_IMAP_HOST')
-        self.imap_port = get_config('EMAIL_IMAP_PORT', self._parse_int)
-        self.imap_ssl = get_config('EMAIL_IMAP_SSL', self._parse_bool)
-        self.smtp_host = get_config('EMAIL_SMTP_HOST')
-        self.smtp_port = get_config('EMAIL_SMTP_PORT', self._parse_int)
-        self.smtp_ssl = get_config('EMAIL_SMTP_SSL', self._parse_bool)
-        signature_file_path = get_config('EMAIL_SIGNATURE_FILE')
-        if signature_file_path:
-            self.signature_file = Path(signature_file_path)
-
-        # 如果环境变量未完整设置，则从.env文件读取
-        if not self.email or not self.password:
-            if not self.env_file.exists():
-                return False
-
+        """Reload config from disk, then overlay non-empty environment values."""
+        values: dict[str, str] = {}
+        if self.env_file.exists():
             try:
-                # 直接读取并解析.env文件
-                with self.env_file.open('r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        # 跳过注释和空行
-                        if not line or line.startswith('#'):
-                            continue
+                for raw_line in self.env_file.read_text(encoding="utf-8").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip()
+            except OSError as exc:
+                LOGGER.error("Unable to read email configuration: %s", exc)
 
-                        # 解析 key=value
-                        if '=' in line:
-                            key, value = line.split('=', 1)
-                            key = key.strip()
-                            value = value.strip()
+        for key in (*FIELD_ENV_KEYS.values(), "EMAIL_SIGNATURE_FILE"):
+            env_value = self._environ.get(key)
+            if env_value is not None and env_value.strip():
+                values[key] = env_value.strip()
 
-                            # 只设置未通过环境变量设置的配置
-                            if key == 'EMAIL_USER' and not self.email:
-                                self.email = value
-                            elif key == 'EMAIL_PASSWORD' and not self.password:
-                                self.password = value
-                            elif key == 'EMAIL_IMAP_HOST' and not self.imap_host:
-                                self.imap_host = value
-                            elif key == 'EMAIL_IMAP_PORT' and not self.imap_port:
-                                self.imap_port = self._parse_int(value)
-                            elif key == 'EMAIL_IMAP_SSL' and self.imap_ssl is None:
-                                self.imap_ssl = self._parse_bool(value)
-                            elif key == 'EMAIL_SMTP_HOST' and not self.smtp_host:
-                                self.smtp_host = value
-                            elif key == 'EMAIL_SMTP_PORT' and not self.smtp_port:
-                                self.smtp_port = self._parse_int(value)
-                            elif key == 'EMAIL_SMTP_SSL' and self.smtp_ssl is None:
-                                self.smtp_ssl = self._parse_bool(value)
-                            elif key == 'EMAIL_SIGNATURE_FILE' and not signature_file_path:
-                                self.signature_file = Path(value)
+        self.email = values.get("EMAIL_USER") or None
+        self.password = values.get("EMAIL_PASSWORD") or None
+        self.imap_host = values.get("EMAIL_IMAP_HOST") or None
+        self.imap_port = self._parse_int(values.get("EMAIL_IMAP_PORT"))
+        self.imap_ssl = self._parse_bool(values.get("EMAIL_IMAP_SSL"))
+        self.smtp_host = values.get("EMAIL_SMTP_HOST") or None
+        self.smtp_port = self._parse_int(values.get("EMAIL_SMTP_PORT"))
+        self.smtp_ssl = self._parse_bool(values.get("EMAIL_SMTP_SSL"))
 
-                return True
-            except Exception as e:
-                print(f"⚠️ 读取配置文件失败: {e}")
-                return False
-
-        return bool(self.email and self.password)
+        signature_value = values.get("EMAIL_SIGNATURE_FILE", "signature.txt")
+        signature_path = Path(signature_value).expanduser()
+        if not signature_path.is_absolute():
+            signature_path = self.config_dir / signature_path
+        self.signature_file = signature_path
+        return self.is_configured()
 
     def load_signature(self) -> str:
-        """
-        从signature.txt加载签名
-
-        Returns:
-            str: 签名内容，如果文件不存在则返回空字符串
-        """
+        """Load a signature without treating a missing file as an error."""
         if not self.signature_file.exists():
-            return ''
-
+            return ""
         try:
-            return self.signature_file.read_text(encoding='utf-8').strip()
-        except Exception as e:
-            print(f"⚠️ 读取签名文件失败: {e}")
-            return ''
+            return self.signature_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            LOGGER.warning("Unable to read email signature: %s", exc)
+            return ""
 
-    def save_config(self, email: str, password: str, imap_host: str, imap_port: int, imap_ssl: bool,
-                   smtp_host: str, smtp_port: int, smtp_ssl: bool) -> bool:
-        """
-        保存配置到.env文件
+    def save_config(
+        self,
+        email: str,
+        password: str,
+        imap_host: str,
+        imap_port: int,
+        imap_ssl: bool,
+        smtp_host: str,
+        smtp_port: int,
+        smtp_ssl: bool,
+    ) -> bool:
+        """Write config outside the plugin cache with best-effort private modes."""
+        serialized = {
+            "EMAIL_USER": email.strip(),
+            "EMAIL_PASSWORD": password,
+            "EMAIL_IMAP_HOST": imap_host.strip(),
+            "EMAIL_IMAP_PORT": str(imap_port),
+            "EMAIL_IMAP_SSL": "true" if imap_ssl else "false",
+            "EMAIL_SMTP_HOST": smtp_host.strip(),
+            "EMAIL_SMTP_PORT": str(smtp_port),
+            "EMAIL_SMTP_SSL": "true" if smtp_ssl else "false",
+            "EMAIL_SIGNATURE_FILE": "signature.txt",
+        }
+        for key, value in serialized.items():
+            if "\n" in value or "\r" in value:
+                raise ValueError(f"{key} must not contain line breaks")
 
-        Args:
-            email: 邮箱地址
-            password: 密码或授权码
-            imap_host: IMAP服务器地址
-            imap_port: IMAP端口
-            imap_ssl: IMAP是否使用SSL
-            smtp_host: SMTP服务器地址
-            smtp_port: SMTP端口
-            smtp_ssl: SMTP是否使用SSL
-
-        Returns:
-            bool: 是否成功保存
-        """
+        lines = [
+            "# Generated by python-email-mcp. Keep this file private.",
+            *(f"{key}={value}" for key, value in serialized.items()),
+            "",
+        ]
         try:
-            lines = [
-                "# 邮箱账号",
-                f"EMAIL_USER={email}",
-                f"EMAIL_PASSWORD={password}",
-                "",
-                "# IMAP配置",
-                f"EMAIL_IMAP_HOST={imap_host}",
-                f"EMAIL_IMAP_PORT={imap_port}",
-                f"EMAIL_IMAP_SSL={'true' if imap_ssl else 'false'}",
-                "",
-                "# SMTP配置",
-                f"EMAIL_SMTP_HOST={smtp_host}",
-                f"EMAIL_SMTP_PORT={smtp_port}",
-                f"EMAIL_SMTP_SSL={'true' if smtp_ssl else 'false'}",
-                "",
-                "# 邮件签名文件（可选）",
-                f"EMAIL_SIGNATURE_FILE=signature.txt"
-            ]
-
-            self.env_file.write_text('\n'.join(lines), encoding='utf-8')
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            self._restrict_permissions(self.config_dir, directory=True)
+            self.env_file.write_text("\n".join(lines), encoding="utf-8")
+            self._restrict_permissions(self.env_file, directory=False)
             return True
-        except Exception as e:
-            print(f"✗ 保存配置失败: {e}")
+        except OSError as exc:
+            LOGGER.error("Unable to save email configuration: %s", exc)
             return False
 
+    def missing_fields(self, protocol: Optional[str] = None) -> list[str]:
+        """Return stable environment-key names for missing or invalid fields."""
+        if protocol == "imap":
+            names = ("email", "password", "imap_host", "imap_port", "imap_ssl")
+        elif protocol == "smtp":
+            names = ("email", "password", "smtp_host", "smtp_port", "smtp_ssl")
+        else:
+            names = tuple(FIELD_ENV_KEYS)
+        return [FIELD_ENV_KEYS[name] for name in names if getattr(self, name) is None]
+
+    def status(self) -> dict:
+        """Return non-secret configuration metadata suitable for MCP output."""
+        self.load_config()
+        return {
+            "configured": self.is_configured(),
+            "config_file": str(self.env_file),
+            "signature_file": str(self.signature_file),
+            "missing_fields": self.missing_fields(),
+            "setup_command": SETUP_COMMAND,
+        }
+
     def get_imap_config(self) -> Tuple[str, int, str, str, bool]:
-        """
-        获取IMAP连接配置
-
-        Returns:
-            Tuple[str, int, str, str, bool]: (host, port, user, password, ssl)
-
-        Raises:
-            ValueError: 配置不完整时抛出异常
-        """
-        if not self.email or not self.password:
-            raise ValueError("邮箱账号或密码未配置")
-
-        if not self.imap_host or not self.imap_port:
-            raise ValueError("IMAP配置未完整，请设置EMAIL_IMAP_HOST和EMAIL_IMAP_PORT")
-
-        if self.imap_ssl is None:
-            raise ValueError("IMAP SSL配置未设置，请设置EMAIL_IMAP_SSL")
-
+        missing = self.missing_fields("imap")
+        if missing:
+            raise ConfigurationError(missing)
         return self.imap_host, self.imap_port, self.email, self.password, self.imap_ssl
 
     def get_smtp_config(self) -> Tuple[str, int, str, str, bool]:
-        """
-        获取SMTP连接配置
-
-        Returns:
-            Tuple[str, int, str, str, bool]: (host, port, user, password, ssl)
-
-        Raises:
-            ValueError: 配置不完整时抛出异常
-        """
-        if not self.email or not self.password:
-            raise ValueError("邮箱账号或密码未配置")
-
-        if not self.smtp_host or not self.smtp_port:
-            raise ValueError("SMTP配置未完整，请设置EMAIL_SMTP_HOST和EMAIL_SMTP_PORT")
-
-        if self.smtp_ssl is None:
-            raise ValueError("SMTP SSL配置未设置，请设置EMAIL_SMTP_SSL")
-
+        missing = self.missing_fields("smtp")
+        if missing:
+            raise ConfigurationError(missing)
         return self.smtp_host, self.smtp_port, self.email, self.password, self.smtp_ssl
 
     def is_configured(self) -> bool:
-        """
-        检查配置是否完整
+        return not self.missing_fields()
 
-        Returns:
-            bool: 配置是否完整
-        """
-        return bool(self.email and self.password)
+    @staticmethod
+    def _restrict_permissions(path: Path, *, directory: bool) -> None:
+        mode = stat.S_IRUSR | stat.S_IWUSR | (stat.S_IXUSR if directory else 0)
+        try:
+            os.chmod(path, mode)
+        except OSError as exc:
+            LOGGER.warning("Unable to restrict permissions for %s: %s", path, exc)
 
     @staticmethod
     def _parse_int(value: Optional[str]) -> Optional[int]:
-        """安全地解析整数字符串"""
         if value is None:
             return None
         try:
-            return int(value)
-        except ValueError:
+            parsed = int(value)
+        except (TypeError, ValueError):
             return None
+        return parsed if 1 <= parsed <= 65535 else None
 
     @staticmethod
     def _parse_bool(value: Optional[str]) -> Optional[bool]:
-        """安全地解析布尔字符串"""
         if value is None:
             return None
-        if value.lower() in ('true', '1', 'yes', 'on'):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
             return True
-        if value.lower() in ('false', '0', 'no', 'off'):
+        if normalized in {"false", "0", "no", "off"}:
             return False
         return None

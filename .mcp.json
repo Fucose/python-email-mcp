@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "python-email": {
+      "command": "uv",
+      "args": ["run", "--locked", "python-email-mcp", "mcp"],
+      "cwd": "."
+    }
+  }
+}

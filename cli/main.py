@@ -1,359 +1,274 @@
-"""命令行工具主程序"""
+"""Command-line interface for python-email-mcp."""
 
-import sys
+from __future__ import annotations
+
 import argparse
+import getpass
+import sys
 from pathlib import Path
 
-# 添加父目录到路径，以便导入email_client
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from email_client import Config, EmailClient, EmailClientError, get_default_download_dir
 
-from email_client import EmailClient, Config
+
+def _with_client(operation):
+    client = EmailClient()
+    try:
+        return operation(client)
+    finally:
+        client.disconnect()
 
 
 def cmd_list(args):
-    """列出最近邮件"""
-    client = EmailClient()
-    emails = client.get_recent_emails(days=args.days, limit=args.limit)
+    def run(client):
+        messages = client.get_recent_emails(days=args.days, limit=args.limit)
+        print(f"最近 {args.days} 天的邮件：{len(messages)} 封")
+        for message in messages:
+            print(f"UID: {message.uid}")
+            print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M')}")
+            print(f"发件人: {message.from_}")
+            print(f"主题: {message.subject}")
+            print("-" * 50)
 
-    if not emails:
-        print(f"最近{args.days}天内没有找到邮件。")
-        return
-
-    print(f"📬 最近{args.days}天的邮件列表 (共{len(emails)}封):\n")
-    for email in emails:
-        print(f"📧 UID: {email.uid}")
-        print(f"📅 日期: {email.date.strftime('%Y-%m-%d %H:%M')}")
-        print(f"👤 发件人: {email.from_}")
-        print(f"📝 主题: {email.subject}")
-        print("─" * 50)
-
-    client.disconnect()
+    _with_client(run)
 
 
 def cmd_search(args):
-    """搜索邮件"""
-    client = EmailClient()
-    emails = client.search_emails(subject=args.subject, days=args.days)
+    def run(client):
+        messages = client.search_emails(subject=args.subject, days=args.days)
+        print(f"搜索结果：{len(messages)} 封")
+        for message in messages:
+            print(f"UID: {message.uid}")
+            print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M')}")
+            print(f"发件人: {message.from_}")
+            print(f"主题: {message.subject}")
+            print("-" * 50)
 
-    if not emails:
-        print(f"未找到主题包含'{args.subject}'的邮件。")
-        return
-
-    print(f"📬 搜索结果 (共{len(emails)}封):\n")
-    for email in emails:
-        print(f"📧 UID: {email.uid}")
-        print(f"📅 日期: {email.date.strftime('%Y-%m-%d %H:%M')}")
-        print(f"👤 发件人: {email.from_}")
-        print(f"📝 主题: {email.subject}")
-        print("─" * 50)
-
-    client.disconnect()
+    _with_client(run)
 
 
 def cmd_view(args):
-    """查看邮件详情"""
-    client = EmailClient()
-    email = client.get_email(args.uid)
+    def run(client):
+        message = client.get_email(args.uid)
+        if not message:
+            print(f"未找到 UID 为 {args.uid} 的邮件")
+            return
+        print(f"UID: {message.uid}")
+        print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"发件人: {message.from_}")
+        print(f"收件人: {message.to}")
+        if message.cc:
+            print(f"抄送: {message.cc}")
+        print(f"主题: {message.subject}")
+        print("-" * 50)
+        if message.body:
+            print(message.body)
+        if message.attachments:
+            print("\n附件：")
+            for attachment in message.attachments:
+                print(f"- {attachment.filename} ({attachment.size} bytes)")
 
-    if not email:
-        print(f"✗ 未找到UID为{args.uid}的邮件")
-        return
+    _with_client(run)
 
-    print(f"📧 邮件详情 (UID: {email.uid})")
-    print("─" * 50)
-    print(f"📅 日期: {email.date.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"👤 发件人: {email.from_}")
-    print(f"👥 收件人: {email.to}")
-    if email.cc:
-        print(f"📋 抄送: {email.cc}")
-    print(f"📝 主题: {email.subject}")
-    print("─" * 50)
 
-    if email.body:
-        print(f"📄 文本内容:\n{email.body}")
-
-    if email.attachments:
-        print(f"\n📎 附件列表:")
-        for i, att in enumerate(email.attachments, 1):
-            print(f"  {i}. {att.filename} ({att.size:,} bytes)")
-
-    client.disconnect()
+def _download_folder(value: str | None) -> Path:
+    return Path(value).expanduser() if value else get_default_download_dir()
 
 
 def cmd_download(args):
-    """下载附件"""
-    client = EmailClient()
-    folder = Path(args.folder)
+    folder = _download_folder(args.folder)
 
-    files = client.download_attachments(args.uid, folder)
+    def run(client):
+        files = client.download_attachments(args.uid, folder)
+        print(f"已下载 {len(files)} 个附件到 {folder.resolve()}")
+        for path in files:
+            print(f"- {path.name}")
 
-    if not files:
-        print("✗ 未找到附件或下载失败")
-        return
-
-    print(f"✓ 下载完成！共下载{len(files)}个文件")
-    print(f"✓ 保存位置: {folder.absolute()}")
-
-    for file_path in files:
-        print(f"  • {file_path.name}")
-
-    client.disconnect()
+    _with_client(run)
 
 
 def cmd_batch_download(args):
-    """批量下载附件"""
-    client = EmailClient()
-    folder = Path(args.folder)
+    folder = _download_folder(args.folder)
 
-    print(f"搜索主题包含'{args.subject}'的邮件...")
-    files = client.batch_download_attachments(args.subject, args.days, folder)
+    def run(client):
+        files = client.batch_download_attachments(args.subject, args.days, folder)
+        print(f"已下载 {len(files)} 个附件到 {folder.resolve()}")
+        for path in files:
+            print(f"- {path.name}")
 
-    if not files:
-        print("✗ 未找到附件或下载失败")
-        return
+    _with_client(run)
 
-    print(f"✓ 批量下载完成！共下载{len(files)}个文件")
-    print(f"✓ 保存位置: {folder.absolute()}")
 
-    for file_path in files:
-        print(f"  • {file_path.name}")
-
-    client.disconnect()
+def _split_addresses(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def cmd_send(args):
-    """发送邮件"""
-    client = EmailClient()
+    def run(client):
+        client.send_email(
+            to=_split_addresses(args.to) or [],
+            subject=args.subject,
+            body=args.body,
+            attachments=[Path(item).expanduser() for item in args.attach] if args.attach else None,
+            cc=_split_addresses(args.cc),
+            bcc=_split_addresses(args.bcc),
+        )
+        print("邮件发送成功")
 
-    # 处理附件
-    attachments = None
-    if args.attach:
-        attachments = [Path(f) for f in args.attach]
-
-    # 处理抄送
-    cc = None
-    if args.cc:
-        cc = args.cc.split(',')
-
-    # 处理密送
-    bcc = None
-    if args.bcc:
-        bcc = args.bcc.split(',')
-
-    success = client.send_email(
-        to=args.to.split(','),
-        subject=args.subject,
-        body=args.body,
-        attachments=attachments,
-        cc=cc,
-        bcc=bcc
-    )
-
-    if success:
-        print(f"✓ 邮件发送成功！")
-        print(f"  收件人: {args.to}")
-        print(f"  主题: {args.subject}")
-    else:
-        print("✗ 邮件发送失败")
-
-    client.disconnect()
+    _with_client(run)
 
 
 def cmd_reply(args):
-    """回复邮件"""
-    client = EmailClient()
+    def run(client):
+        client.reply(
+            uid=args.uid,
+            body=args.body,
+            attachments=[Path(item).expanduser() for item in args.attach] if args.attach else None,
+            reply_all=args.reply_all,
+        )
+        print("回复发送成功")
 
-    # 处理附件
-    attachments = None
-    if args.attach:
-        attachments = [Path(f) for f in args.attach]
+    _with_client(run)
 
-    success = client.reply(
-        uid=args.uid,
-        body=args.body,
-        attachments=attachments,
-        reply_all=args.reply_all
-    )
 
-    if success:
-        print(f"✓ 回复发送成功！")
-    else:
-        print("✗ 回复发送失败")
-
-    client.disconnect()
+def _prompt_value(label: str, supplied: str | None, default: str | None = None) -> str:
+    if supplied:
+        return supplied.strip()
+    suffix = f"（默认 {default}）" if default else ""
+    value = input(f"{label}{suffix}: ").strip()
+    return value or (default or "")
 
 
 def cmd_setup(args):
-    """配置邮箱"""
+    """Collect the authorization code only through a non-echoing terminal prompt."""
     config = Config()
-
-    # 检查是否已经配置
-    if config.env_file.exists():
-        overwrite = input(f"配置文件{config.env_file}已存在，是否覆盖？(y/N): ")
-        if overwrite.lower() != 'y':
+    if config.env_file.exists() and not args.force:
+        overwrite = input(f"配置文件 {config.env_file} 已存在，是否覆盖？(y/N): ").strip().lower()
+        if overwrite not in {"y", "yes"}:
             print("操作已取消")
             return
 
-    # 获取配置参数
-    email = args.email
-    password = args.password
-    imap_host = args.imap_host
-    imap_port = args.imap_port
-    imap_ssl = args.imap_ssl
-    smtp_host = args.smtp_host
-    smtp_port = args.smtp_port
-    smtp_ssl = args.smtp_ssl
+    email = _prompt_value("邮箱地址", args.email)
+    password = getpass.getpass("邮箱密码或授权码（输入不会显示）: ")
+    imap_host = _prompt_value("IMAP 服务器", args.imap_host, "mail.cstnet.cn")
+    smtp_host = _prompt_value("SMTP 服务器", args.smtp_host, "mail.cstnet.cn")
+    if not email or not password:
+        raise ValueError("邮箱地址和授权码不能为空")
 
-    # 如果没有提供参数，则交互式输入
-    if not email:
-        email = input("请输入邮箱地址: ").strip()
+    saved = config.save_config(
+        email=email,
+        password=password,
+        imap_host=imap_host,
+        imap_port=args.imap_port,
+        imap_ssl=args.imap_ssl,
+        smtp_host=smtp_host,
+        smtp_port=args.smtp_port,
+        smtp_ssl=args.smtp_ssl,
+    )
+    if not saved:
+        raise OSError(f"无法写入配置文件 {config.env_file}")
 
-    if not password:
-        import getpass
-        password = getpass.getpass("请输入邮箱密码或授权码: ").strip()
-
-    if not imap_host:
-        imap_host = input("请输入IMAP服务器地址 (默认: mail.cstnet.cn): ").strip()
-        imap_host = imap_host or "mail.cstnet.cn"
-
-    if not imap_port:
-        imap_port_input = input("请输入IMAP端口 (默认: 993): ").strip()
-        imap_port = int(imap_port_input) if imap_port_input else 993
-
-    if imap_ssl is None:
-        imap_ssl_input = input("IMAP使用SSL加密? (Y/n): ").strip()
-        imap_ssl = imap_ssl_input.lower() not in ('n', 'no', 'false', '0')
-
-    if not smtp_host:
-        smtp_host = input("请输入SMTP服务器地址 (默认: mail.cstnet.cn): ").strip()
-        smtp_host = smtp_host or "mail.cstnet.cn"
-
-    if not smtp_port:
-        smtp_port_input = input("请输入SMTP端口 (默认: 465): ").strip()
-        smtp_port = int(smtp_port_input) if smtp_port_input else 465
-
-    if smtp_ssl is None:
-        smtp_ssl_input = input("SMTP使用SSL加密? (Y/n): ").strip()
-        smtp_ssl = smtp_ssl_input.lower() not in ('n', 'no', 'false', '0')
-
-    # 保存配置
-    success = config.save_config(email, password, imap_host, imap_port, imap_ssl, smtp_host, smtp_port, smtp_ssl)
-
-    if success:
-        print(f"\n✓ 配置已保存到{config.env_file}")
-        print(f"✓ 邮箱: {email}")
-        print(f"✓ IMAP: {imap_host}:{imap_port} (SSL: {'是' if imap_ssl else '否'})")
-        print(f"✓ SMTP: {smtp_host}:{smtp_port} (SSL: {'是' if smtp_ssl else '否'})")
-        print("\n💡 提示: 运行测试命令验证配置:")
-        print("  python main.py cli test")
-    else:
-        print("✗ 配置保存失败")
+    print(f"配置已保存到 {config.env_file}")
+    print(f"邮箱: {email}")
+    print(f"IMAP: {imap_host}:{args.imap_port} (SSL: {args.imap_ssl})")
+    print(f"SMTP: {smtp_host}:{args.smtp_port} (SSL: {args.smtp_ssl})")
+    print("运行 `python-email-mcp cli test` 验证连接。")
 
 
 def cmd_test(args):
-    """测试连接"""
-    client = EmailClient()
-    results = client.test_connection(args.type)
+    def run(client):
+        results = client.test_connection(args.type)
+        for protocol, result in results.items():
+            state = "成功" if result["ok"] else "失败"
+            print(f"{protocol.upper()}: {state} - {result['message']}")
 
-    for key, message in results.items():
-        print(message)
+    _with_client(run)
 
-    client.disconnect()
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Python Email MCP 命令行工具")
+    parser.add_argument("--verbose", action="store_true", help="显示异常堆栈")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    list_parser = subparsers.add_parser("list", help="列出最近邮件")
+    list_parser.add_argument("--days", type=int, default=3)
+    list_parser.add_argument("--limit", type=int, default=20)
+
+    search_parser = subparsers.add_parser("search", help="按主题搜索邮件")
+    search_parser.add_argument("--subject", required=True)
+    search_parser.add_argument("--days", type=int, default=7)
+
+    view_parser = subparsers.add_parser("view", help="查看邮件详情")
+    view_parser.add_argument("--uid", required=True)
+
+    download_parser = subparsers.add_parser("download", help="下载附件")
+    download_parser.add_argument("--uid", required=True)
+    download_parser.add_argument("--folder", help="默认 ~/Downloads/python-email-mcp")
+
+    batch_parser = subparsers.add_parser("batch-download", help="批量下载附件")
+    batch_parser.add_argument("--subject", required=True)
+    batch_parser.add_argument("--days", type=int, default=7)
+    batch_parser.add_argument("--folder", help="默认 ~/Downloads/python-email-mcp")
+
+    send_parser = subparsers.add_parser("send", help="发送邮件")
+    send_parser.add_argument("--to", required=True)
+    send_parser.add_argument("--subject", required=True)
+    send_parser.add_argument("--body", required=True)
+    send_parser.add_argument("--attach", nargs="*")
+    send_parser.add_argument("--cc")
+    send_parser.add_argument("--bcc")
+
+    reply_parser = subparsers.add_parser("reply", help="回复邮件")
+    reply_parser.add_argument("--uid", required=True)
+    reply_parser.add_argument("--body", required=True)
+    reply_parser.add_argument("--attach", nargs="*")
+    reply_parser.add_argument("--reply-all", action="store_true")
+
+    setup_parser = subparsers.add_parser("setup", help="交互式配置邮箱")
+    setup_parser.add_argument("--email")
+    setup_parser.add_argument("--imap-host")
+    setup_parser.add_argument("--imap-port", type=int, default=993)
+    setup_parser.add_argument(
+        "--imap-ssl", action=argparse.BooleanOptionalAction, default=True
+    )
+    setup_parser.add_argument("--smtp-host")
+    setup_parser.add_argument("--smtp-port", type=int, default=465)
+    setup_parser.add_argument(
+        "--smtp-ssl", action=argparse.BooleanOptionalAction, default=True
+    )
+    setup_parser.add_argument("--force", action="store_true", help="不询问直接覆盖")
+
+    test_parser = subparsers.add_parser("test", help="测试邮箱连接")
+    test_parser.add_argument("--type", choices=["imap", "smtp", "both"], default="both")
+    return parser
 
 
 def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description='Python邮件客户端 - 命令行工具')
-    subparsers = parser.add_subparsers(dest='command', help='可用命令')
-
-    # list命令
-    parser_list = subparsers.add_parser('list', help='列出最近邮件')
-    parser_list.add_argument('--days', type=int, default=3, help='最近几天（默认3）')
-    parser_list.add_argument('--limit', type=int, default=20, help='最大数量（默认20）')
-
-    # search命令
-    parser_search = subparsers.add_parser('search', help='搜索邮件')
-    parser_search.add_argument('--subject', required=True, help='主题关键词')
-    parser_search.add_argument('--days', type=int, default=7, help='搜索最近几天（默认7）')
-
-    # view命令
-    parser_view = subparsers.add_parser('view', help='查看邮件详情')
-    parser_view.add_argument('--uid', required=True, help='邮件UID')
-
-    # download命令
-    parser_download = subparsers.add_parser('download', help='下载附件')
-    parser_download.add_argument('--uid', required=True, help='邮件UID')
-    parser_download.add_argument('--folder', default='downloads', help='下载文件夹（默认downloads）')
-
-    # batch-download命令
-    parser_batch = subparsers.add_parser('batch-download', help='批量下载附件')
-    parser_batch.add_argument('--subject', required=True, help='主题关键词')
-    parser_batch.add_argument('--days', type=int, default=7, help='搜索最近几天（默认7）')
-    parser_batch.add_argument('--folder', default='downloads', help='下载文件夹（默认downloads）')
-
-    # send命令
-    parser_send = subparsers.add_parser('send', help='发送邮件')
-    parser_send.add_argument('--to', required=True, help='收件人（多个用逗号分隔）')
-    parser_send.add_argument('--subject', required=True, help='邮件主题')
-    parser_send.add_argument('--body', required=True, help='邮件正文')
-    parser_send.add_argument('--attach', nargs='*', help='附件文件路径')
-    parser_send.add_argument('--cc', help='抄送地址（多个用逗号分隔）')
-    parser_send.add_argument('--bcc', help='密送地址（多个用逗号分隔）')
-
-    # reply命令
-    parser_reply = subparsers.add_parser('reply', help='回复邮件')
-    parser_reply.add_argument('--uid', required=True, help='原邮件UID')
-    parser_reply.add_argument('--body', required=True, help='回复正文')
-    parser_reply.add_argument('--attach', nargs='*', help='附件文件路径')
-    parser_reply.add_argument('--reply-all', action='store_true', help='回复全部')
-
-    # setup命令
-    parser_setup = subparsers.add_parser('setup', help='配置邮箱')
-    parser_setup.add_argument('--email', help='邮箱地址')
-    parser_setup.add_argument('--password', help='邮箱密码或授权码')
-    parser_setup.add_argument('--imap-host', help='IMAP服务器地址')
-    parser_setup.add_argument('--imap-port', type=int, help='IMAP端口')
-    parser_setup.add_argument('--imap-ssl', type=bool, help='IMAP是否使用SSL')
-    parser_setup.add_argument('--smtp-host', help='SMTP服务器地址')
-    parser_setup.add_argument('--smtp-port', type=int, help='SMTP端口')
-    parser_setup.add_argument('--smtp-ssl', type=bool, help='SMTP是否使用SSL')
-
-    # test命令
-    parser_test = subparsers.add_parser('test', help='测试连接')
-    parser_test.add_argument('--type', choices=['imap', 'smtp', 'both'],
-                             default='both', help='测试类型（默认both）')
-
-    # 解析参数
+    parser = build_parser()
     args = parser.parse_args()
-
-    if not args.command:
-        parser.print_help()
-        return
-
-    # 执行对应命令
     command_func = {
-        'list': cmd_list,
-        'search': cmd_search,
-        'view': cmd_view,
-        'download': cmd_download,
-        'batch-download': cmd_batch_download,
-        'send': cmd_send,
-        'reply': cmd_reply,
-        'setup': cmd_setup,
-        'test': cmd_test,
-    }.get(args.command)
+        "list": cmd_list,
+        "search": cmd_search,
+        "view": cmd_view,
+        "download": cmd_download,
+        "batch-download": cmd_batch_download,
+        "send": cmd_send,
+        "reply": cmd_reply,
+        "setup": cmd_setup,
+        "test": cmd_test,
+    }[args.command]
+    try:
+        command_func(args)
+    except KeyboardInterrupt:
+        print("\n操作已取消", file=sys.stderr)
+        raise SystemExit(130)
+    except (EmailClientError, OSError, ValueError) as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        if args.verbose:
+            raise
+        raise SystemExit(1)
 
-    if command_func:
-        try:
-            command_func(args)
-        except KeyboardInterrupt:
-            print("\n\n操作已取消")
-        except Exception as e:
-            print(f"✗ 发生错误: {e}")
-            if args.verbose:
-                import traceback
-                traceback.print_exc()
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

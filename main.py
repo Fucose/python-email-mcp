@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Python Email MCP - 主入口文件
-支持MCP服务器模式和命令行工具模式
-"""
+"""Console entry point for MCP and CLI modes."""
 
 import sys
 from pathlib import Path
@@ -11,14 +8,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 
-def print_usage():
+def print_usage(file=None):
     """打印使用说明"""
     print("""
 Python Email MCP - 邮件客户端
 
 使用方法:
-  python main.py mcp              启动MCP服务器模式
-  python main.py cli <command>    使用命令行工具模式
+  python-email-mcp mcp              启动 MCP 服务器模式
+  python-email-mcp cli <command>    使用命令行工具模式
 
 命令行工具命令:
   list                          列出最近邮件
@@ -32,51 +29,43 @@ Python Email MCP - 邮件客户端
   test                          测试连接
 
 示例:
-  # MCP模式
-  python main.py mcp
-
-  # CLI模式
-  python main.py cli list --days 3
-  python main.py cli search --subject "会议通知"
-  python main.py cli download --uid 12345 --folder downloads
-  python main.py cli send --to test@example.com --subject "测试" --body "内容"
-  python main.py cli setup
+  python-email-mcp cli list --days 3
+  python-email-mcp cli search --subject "会议通知"
+  python-email-mcp cli setup
 
 配置:
-  首次使用请运行: python main.py cli setup
-  或手动创建 .env 文件（参考 .env.example）
+  首次使用请运行 python-email-mcp cli setup。
+  配置保存在插件缓存外的每用户配置目录。
 
 文档:
   详细使用说明请查看 README.md
-""")
+""", file=file or sys.stdout)
 
 
 def main():
     """主函数"""
-    if len(sys.argv) < 2:
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
         print_usage()
+        return
+    if len(sys.argv) < 2:
+        print_usage(sys.stderr)
         sys.exit(1)
 
     mode = sys.argv[1].lower()
 
     if mode == 'mcp':
-        # MCP服务器模式
         from mcp_server.server import main as mcp_main
         import asyncio
         asyncio.run(mcp_main())
 
     elif mode == 'cli':
-        # 命令行工具模式
         from cli.main import main as cli_main
-        # 移除 'cli' 参数
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         cli_main()
 
     else:
-        # 未知模式
-        print(f"✗ 未知模式: {mode}")
-        print()
-        print_usage()
+        print(f"未知模式: {mode}", file=sys.stderr)
+        print_usage(sys.stderr)
         sys.exit(1)
 
 
@@ -84,10 +73,10 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n操作已取消")
+        print("\n操作已取消", file=sys.stderr)
         sys.exit(0)
     except Exception as e:
-        print(f"✗ 发生错误: {e}")
+        print(f"启动失败: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)

@@ -1,6 +1,8 @@
 """SMTP客户端模块"""
 
 import smtplib
+import logging
+from email.utils import getaddresses, parseaddr
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -8,6 +10,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from .models import Email
+from .errors import AuthenticationError, InvalidArgumentError, TransportError
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SMTPClient:
@@ -44,14 +49,20 @@ class SMTPClient:
                 self.client = smtplib.SMTP_SSL(self.host, self.port)
             else:
                 self.client = smtplib.SMTP(self.host, self.port)
-                # STARTTLS for non-SSL connections
                 self.client.starttls()
+        except (OSError, smtplib.SMTPException) as exc:
+            self.client = None
+            raise TransportError(f"Unable to connect to SMTP server: {exc}") from exc
 
+        try:
             self.client.login(self.user, self.password)
-            return True
-        except Exception as e:
-            print(f"✗ SMTP连接失败: {e}")
-            return False
+        except smtplib.SMTPAuthenticationError as exc:
+            self.disconnect()
+            raise AuthenticationError("SMTP authentication failed") from exc
+        except smtplib.SMTPException as exc:
+            self.disconnect()
+            raise TransportError(f"SMTP login failed: {exc}") from exc
+        return True
 
     def disconnect(self):
         """断开SMTP连接"""
@@ -86,8 +97,8 @@ class SMTPClient:
                 self.signature = signature_file.read_text(encoding='utf-8').strip()
                 return True
             return False
-        except Exception as e:
-            print(f"⚠️ 加载签名文件失败: {e}")
+        except OSError as exc:
+            LOGGER.warning("Unable to load signature file: %s", exc)
             return False
 
     def send_email(
@@ -116,8 +127,7 @@ class SMTPClient:
             bool: 是否成功发送
         """
         if not self.client:
-            if not self.connect():
-                return False
+            self.connect()
 
         try:
             # 添加签名到正文（除非跳过）
@@ -143,7 +153,7 @@ class SMTPClient:
             if attachments:
                 for attachment_path in attachments:
                     if not self._add_attachment(msg, attachment_path):
-                        print(f"⚠️ 添加附件失败: {attachment_path}")
+                        raise InvalidArgumentError(f"Attachment is not a readable file: {attachment_path}")
 
             # 发送邮件
             all_recipients = to.copy()
@@ -155,9 +165,12 @@ class SMTPClient:
             self.client.send_message(msg, to_addrs=all_recipients)
             return True
 
-        except Exception as e:
-            print(f"✗ 发送邮件失败: {e}")
-            return False
+        except (AuthenticationError, InvalidArgumentError, TransportError):
+            raise
+        except smtplib.SMTPAuthenticationError as exc:
+            raise AuthenticationError("SMTP authentication failed") from exc
+        except (OSError, smtplib.SMTPException) as exc:
+            raise TransportError(f"Unable to send email: {exc}") from exc
 
     def reply_email(
         self,
@@ -182,21 +195,23 @@ class SMTPClient:
         reply_body = self._build_reply_text(original_email, body)
 
         # 确定收件人
-        to = [self._extract_email(original_email.from_)]
+        sender = parseaddr(original_email.from_)[1]
+        to = [sender] if sender else []
         cc = None
 
         if reply_all:
-            # 回复全部：包含所有收件人和抄送人
-            recipients = [self._extract_email(original_email.to)]
-            if original_email.cc:
-                recipients.extend([self._extract_email(email) for email in original_email.cc.split(',')])
-
-            # 过滤掉自己
-            to = [r for r in recipients if r and self.user not in r]
-
-            if original_email.cc:
-                cc = [self._extract_email(email) for email in original_email.cc.split(',')
-                      if email and self.user not in email]
+            own_address = parseaddr(self.user)[1].lower()
+            to_candidates = [sender, *(address for _, address in getaddresses([original_email.to]))]
+            to = self._unique_addresses(to_candidates, excluded={own_address})
+            cc_candidates = (
+                [address for _, address in getaddresses([original_email.cc])]
+                if original_email.cc
+                else []
+            )
+            cc = self._unique_addresses(
+                cc_candidates,
+                excluded={own_address, *(address.lower() for address in to)},
+            ) or None
 
         # 构建主题（添加Re:前缀）
         subject = original_email.subject
@@ -227,7 +242,6 @@ class SMTPClient:
         try:
             # 验证文件存在
             if not file_path.exists() or not file_path.is_file():
-                print(f"⚠️ 文件不存在: {file_path}")
                 return False
 
             # 读取文件内容
@@ -241,8 +255,8 @@ class SMTPClient:
 
             return True
 
-        except Exception as e:
-            print(f"⚠️ 添加附件失败: {e}")
+        except OSError as exc:
+            LOGGER.warning("Unable to read attachment %s: %s", file_path, exc)
             return False
 
     def _build_reply_text(self, original_email: Email, reply_body: str) -> str:
@@ -308,3 +322,14 @@ class SMTPClient:
 
         # 如果没有<...>，直接返回
         return email_str.strip()
+
+    @staticmethod
+    def _unique_addresses(addresses: List[str], excluded: set[str]) -> List[str]:
+        result = []
+        seen = set(excluded)
+        for address in addresses:
+            normalized = address.strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                result.append(address.strip())
+        return result

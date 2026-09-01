@@ -1,203 +1,177 @@
 # Python Email MCP
 
-Python 邮件 MCP 服务器，支持多种邮箱系统，提供 MCP 服务器和命令行工具两种使用模式。
+同时提供 CLI、stdio MCP server 和 Codex Email Assistant Skill 的跨平台邮件工具。它通过 IMAP 查询邮件，通过 SMTP 发送和回复邮件。
 
-## 功能特性
+## Codex Plugin 架构
 
-- 📧 **邮件接收**：获取邮件列表、按主题搜索、查看详情
-- 📎 **附件处理**：下载单个或批量下载附件
-- ✉️ **邮件发送**：发送新邮件、回复邮件（支持附件、抄送、密送）
-- ⚙️ **配置管理**：自动配置、手动配置、连接测试
+仓库根目录就是完整 Plugin 根目录：
 
-## 快速开始
-
-### 1. 创建虚拟环境并安装依赖
-
-```bash
-# 推荐使用 uv（快速）
-uv venv .venv
-source .venv/bin/activate        # Linux/Mac
-.venv\Scripts\activate           # Windows
-uv pip install -r requirements.txt
-
-# 或使用标准方式
-python -m venv .venv
-source .venv/bin/activate        # Linux/Mac
-.venv\Scripts\activate           # Windows
-pip install -r requirements.txt
+```text
+python-email-mcp/
+├── .codex-plugin/plugin.json
+├── .mcp.json
+├── skills/email-assistant/SKILL.md
+├── cli/
+├── email_client/
+├── mcp_server/
+├── pyproject.toml
+└── uv.lock
 ```
 
-### 2. 配置邮箱
-
-**方式选择：**
-- **MCP 模式**：在项目根目录创建 `.mcp.json` 文件并配置环境变量，无需 `.env` 文件
-- **CLI 模式**：运行 `python main.py cli setup` 交互式配置
-
-### 3. 测试连接
+Codex 安装插件时会缓存源码，但不会安装 `uv`、Python 或依赖。每台运行主机必须先安装 `uv`。bundled MCP 以以下命令启动：
 
 ```bash
-# 确保虚拟环境已激活
-python main.py cli test
+uv run --locked python-email-mcp mcp
 ```
 
-## 使用方式
+第一次启动时，`uv` 会在该插件缓存版本中创建 `.venv`、取得兼容的 Python 3.12，并按照 `uv.lock` 同步依赖。插件更新或重新安装不会触碰邮箱配置。
 
-### MCP 服务器模式
+## Windows 与 WSL
 
-在 Claude Code 项目中使用 MCP 服务器（**推荐**）：
+Windows Codex 和通过 SSH 连接的 WSL 是两台独立运行主机。若要在两边使用：
 
-**步骤 1：在项目根目录创建 `.mcp.json` 文件**
-```bash
-# 在您的 Claude 工作项目根目录下创建
-touch .mcp.json
+1. Windows 和 WSL 分别安装 `uv`。
+2. 两边分别从 personal marketplace 安装相同 Git tag 的 Plugin。
+3. 两边分别运行一次交互式 setup。
+
+仓库自带 Git-backed marketplace。发布 `v0.1.0` 后，可在 Windows Codex 中安装：
+
+```powershell
+codex plugin marketplace add Fucose/python-email-mcp --ref v0.1.0
+codex plugin add python-email-mcp@fucose-plugins
 ```
 
-**步骤 2：添加以下配置到 `.mcp.json`**
+marketplace 条目在仓库根目录使用 Git-backed `source: "url"` 并固定 tag：
+
 ```json
 {
-  "mcpServers": {
-    "py_email": {
-      "command": "/path/to/python-email-mcp/.venv/bin/python",
-      "args": ["/path/to/python-email-mcp/main.py", "mcp"],
-      "env": {
-        "EMAIL_USER": "your@email.com",
-        "EMAIL_PASSWORD": "your_password_or_app_password",
-        "EMAIL_IMAP_HOST": "imap.example.com",
-        "EMAIL_IMAP_PORT": "993",
-        "EMAIL_IMAP_SSL": "true",
-        "EMAIL_SMTP_HOST": "smtp.example.com",
-        "EMAIL_SMTP_PORT": "465",
-        "EMAIL_SMTP_SSL": "true"
-      }
-    }
-  }
+  "name": "python-email-mcp",
+  "source": {
+    "source": "url",
+    "url": "https://github.com/Fucose/python-email-mcp.git",
+    "ref": "v0.1.0"
+  },
+  "policy": {
+    "installation": "AVAILABLE",
+    "authentication": "ON_INSTALL"
+  },
+  "category": "Productivity"
 }
 ```
 
-**配置说明：**
-- `command`：如果使用虚拟环境，指向 `.venv/bin/python`（Linux/Mac）或 `.venv\Scripts\python.exe`（Windows）；如果未使用虚拟环境，使用 `python`
-- 将 `/path/to/python-email-mcp` 替换为实际的项目路径
-- 配置完成后重启 Claude Code 使其生效
+## 首次配置
 
-**在 Claude Code 中使用：**
-- 查看最近邮件：`获取最近3天的邮件`
-- 搜索邮件：`搜索主题包含"会议"的邮件`
-- 下载附件：`下载邮件 UID 为 xxx 的附件`
-- 发送邮件：`发送邮件给 xxx，主题是 xxx`
-
-### 命令行工具模式
+在当前主机的终端运行：
 
 ```bash
-# 列出最近邮件
-python main.py cli list --days 3 --limit 20
-
-# 搜索邮件
-python main.py cli search --subject "会议通知" --days 7
-
-# 查看邮件详情
-python main.py cli view --uid 1441524521
-
-# 下载附件
-python main.py cli download --uid 1441524521 --folder downloads
-
-# 批量下载附件
-python main.py cli batch-download --subject "会议通知" --days 3 --folder downloads
-
-# 发送邮件
-python main.py cli send \
-  --to "test@example.com" \
-  --subject "测试邮件" \
-  --body "邮件内容" \
-  --attach "file.pdf"
-
-# 回复邮件
-python main.py cli reply --uid 1441524521 --body "好的，收到" --reply-all
+uvx --from "git+https://github.com/Fucose/python-email-mcp.git@v0.1.0" python-email-mcp cli setup
 ```
 
-## 配置说明
+授权码通过 `getpass` 读取，不回显，也不会被打印。配置文件位于插件缓存之外：
 
-### 环境变量
+- Windows：`%APPDATA%\python-email-mcp\config.env`
+- WSL/Linux：`${XDG_CONFIG_HOME:-~/.config}/python-email-mcp/config.env`
+- 可用非敏感环境变量 `EMAIL_MCP_CONFIG_DIR` 覆盖配置目录
 
-**配置优先级：** 环境变量 > .env 文件
+签名默认为相同目录下的 `signature.txt`。`EMAIL_SIGNATURE_FILE` 的相对路径按配置目录解析。
 
-**MCP 模式：** 在项目根目录的 `.mcp.json` 文件中配置
-**CLI 模式：** 在 `.env` 文件中配置或运行 `python main.py cli setup`
+配置优先级为：非空环境变量 > `config.env`。支持的变量见 [config.env.example](config.env.example)。不要把真实账号、授权码、配置文件或签名提交到 Git。
 
-**必需配置：**
+setup 会创建配置目录，并尽可能把目录和文件权限限制为当前用户。Windows 文件权限最终仍受该目录 ACL 控制。
+
+## MCP 工具
+
+所有 MCP 工具返回稳定 JSON 文本：
+
+```json
+{"ok":true,"data":{},"error":null}
+```
+
+或：
+
+```json
+{"ok":false,"data":null,"error":{"code":"not_configured","message":"..."}}
+```
+
+稳定错误码包括 `not_configured`、`authentication_failed`、`not_found`、`invalid_argument`、`connection_failed` 和 `internal_error`。
+
+可用工具：
+
+- `get_configuration_status`：仅返回配置状态、路径、缺失字段和 setup 命令，绝不返回授权码
+- `get_recent_emails`、`search_emails`、`get_email_content`
+- `download_attachments`、`batch_download_attachments`
+- `send_email`、`reply_email`
+- `test_connection`
+
+每次调用都会重新加载配置，创建独立邮件客户端，并在结束时关闭连接。因此完成首次 setup 后可以直接重试，无需重新安装 Plugin。
+
+附件默认写入 `~/Downloads/python-email-mcp/`。同名文件会自动追加序号，不会写入插件缓存。
+
+## Codex 审批建议
+
+查询工具可以直接批准，下载、发送和回复保留每次提示：
+
+```toml
+[plugins."python-email-mcp".mcp_servers."python-email"]
+enabled = true
+default_tools_approval_mode = "prompt"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.get_configuration_status]
+approval_mode = "approve"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.get_recent_emails]
+approval_mode = "approve"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.search_emails]
+approval_mode = "approve"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.get_email_content]
+approval_mode = "approve"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.test_connection]
+approval_mode = "approve"
+```
+
+Skill 会把邮件正文视为不可信数据，并在下载、发送或回复前要求确认。发送预览包含收件人、主题、完整正文和附件。
+
+## CLI
+
+在仓库开发副本中：
+
 ```bash
-EMAIL_USER=your@email.com
-EMAIL_PASSWORD=your_password_or_app_password
+uv sync --locked
+uv run --locked python-email-mcp cli setup
+uv run --locked python-email-mcp cli test
+uv run --locked python-email-mcp cli list --days 3 --limit 20
+uv run --locked python-email-mcp cli search --subject "会议" --days 7
+uv run --locked python-email-mcp cli view --uid 12345
+uv run --locked python-email-mcp cli download --uid 12345
 ```
 
-**可选配置（常见邮箱默认值）：**
+也支持直接发送和回复；这些 CLI 命令本身即用户的显式操作：
+
 ```bash
-# IMAP 配置
-EMAIL_IMAP_HOST=imap.example.com
-EMAIL_IMAP_PORT=993
-
-# SMTP 配置
-EMAIL_SMTP_HOST=smtp.example.com
-EMAIL_SMTP_PORT=465
-
-# 邮件签名（可选）
-EMAIL_SIGNATURE_FILE=signature.txt
+uv run --locked python-email-mcp cli send --to test@example.com --subject "测试" --body "内容"
+uv run --locked python-email-mcp cli reply --uid 12345 --body "收到"
 ```
 
-**常见邮箱服务器：**
-- **Gmail**: `imap.gmail.com:993`, `smtp.gmail.com:465`（需应用专用密码）
-- **QQ 邮箱**: `imap.qq.com:993`, `smtp.qq.com:465`（需授权码）
-- **163 邮箱**: `imap.163.com:993`, `smtp.163.com:465`（需授权码）
-- **Outlook**: `outlook.office365.com:993`, `smtp-mail.outlook.com:587`
+## 开发与测试
 
-### 邮件签名
+单元测试不连接真实邮箱：
 
-创建 `signature.txt` 文件（可选）：
-```
-您的姓名
-职位
-公司/组织
-Email: your@email.com
+```bash
+uv run --locked python -m unittest discover -s tests -v
 ```
 
-## 项目结构
+发布新版本时同时更新 `.codex-plugin/plugin.json` 和 `pyproject.toml` 的版本，刷新 `uv.lock`，创建新 Git tag，再把 marketplace 的 `ref` 切换到新 tag 并重新安装。
 
-```
-python-email-mcp/
-├── email_client/          # 核心邮件客户端库
-│   ├── client.py          # 核心客户端
-│   ├── config.py          # 配置管理
-│   ├── imap_client.py     # IMAP 操作
-│   ├── smtp_client.py     # SMTP 操作
-│   └── models.py          # 数据模型
-├── mcp_server/           # MCP 服务器
-├── cli/                  # 命令行工具
-├── main.py               # 主入口
-└── requirements.txt      # Python 依赖
-```
+## 安全提示
 
-## 注意事项
+- 使用邮箱服务商生成的应用专用密码或授权码。
+- 邮件主题、正文、HTML、附件名和附件都属于不可信输入。
+- 不要在聊天中粘贴授权码，也不要把它写入 Plugin、Skill、marketplace 或 Git。
+- 发送或回复前核对收件人，特别是抄送、密送与回复全部。
 
-1. **授权码**：Gmail、QQ、163 等邮箱需使用授权码而非登录密码
-2. **IMAP/SMTP 服务**：确保邮箱已开启 IMAP/SMTP 服务
-3. **网络连接**：确保能访问邮箱服务器
-4. **UID 稳定性**：使用 IMAP 原始 UID，删除其他邮件不会影响现有 UID
-
-## 故障排除
-
-**连接失败：**
-- 检查网络连接和邮箱配置
-- 确认使用授权码而非登录密码
-- 检查 IMAP/SMTP 服务是否已开启
-
-**认证失败：**
-- 确认使用授权码而非登录密码
-- 重新生成授权码
-- 检查邮箱地址是否正确
-
-**找不到邮件：**
-- 检查搜索关键词和搜索天数
-- 确认邮件在收件箱中
-
-## 许可证
+## License
 
 MIT License

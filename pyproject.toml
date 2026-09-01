@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python-email-mcp"
+version = "0.1.0"
+description = "Cross-platform CLI and MCP server for reading and sending email"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+python-email-mcp = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["cli*", "email_client*", "mcp_server*"]
