@@ -49,7 +49,7 @@ uv run --locked --group test python -m unittest discover -s tests -v
 
 ## 版本维护与发布检查
 
-当前版本为 `0.2.0 - Unreleased`。准备正式发布时，同步 `pyproject.toml`、根插件清单、Claude Code 清单和锁文件中的版本。Codex marketplace 从本地预览目录读取同一份插件快照。发布后从对应 Git tag 添加 marketplace。
+当前版本为 `0.2.0`。发布新版本时，同步 `pyproject.toml`、根插件清单、Claude Code 清单、DeepSeek Harness bundle 清单和锁文件中的版本。Codex marketplace 从本地预览目录读取同一份插件快照。发布后从对应 Git tag 添加 marketplace。
 
 完成本地验证并确认发布已获授权后，创建 tag 并运行以下检查。
 

@@ -28,7 +28,7 @@
 
 运行本地 MCP server 的主机需要安装 `uv`。项目使用 Python 3.12。不同主机上的插件、运行时与邮箱配置互相独立，例如 Windows 与 WSL 需要分别安装和配置。
 
-当前开发版本 `0.2.0` 尚未发布。安装方式见对应的平台指南。首次执行邮箱操作前先调用 `get_configuration_status`。若结果列出缺失字段，在运行 MCP server 的同一主机终端执行其中的完整 `setup_command`。
+当前版本 `0.2.0`。安装方式见对应的平台指南。首次执行邮箱操作前先调用 `get_configuration_status`。若结果列出缺失字段，在运行 MCP server 的同一主机终端执行其中的完整 `setup_command`。
 
 `setup_command` 使用当前 MCP 进程的 Python 解释器和该安装包中 `main.py` 的绝对路径。Windows 和 POSIX 命令会按对应 shell 格式引用路径。本地源码 checkout 可以使用以下命令，并将项目路径替换为仓库绝对路径。
 
@@ -117,7 +117,7 @@ uv run --locked --group test python scripts/validate_manifests.py
 uv run --locked --group test python -m unittest discover -s tests -v
 ```
 
-manifest 验证默认使用仓库内的官方 JSON Schema 副本，不访问网络。发布检查参数只在正式 tag 创建并授权发布后使用。当前版本记录为 `0.2.0 - Unreleased`。
+manifest 验证默认使用仓库内的官方 JSON Schema 副本，不访问网络。发布检查参数只在正式 tag 创建并授权发布后使用。当前版本记录为 `0.2.0`。
 
 ## License
 

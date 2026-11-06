@@ -16,7 +16,7 @@ claude plugin install python-email-mcp@fucose-plugins
 
 ## 安装已发布版本
 
-创建并发布 `v0.2.0` tag 后，将 marketplace 固定到该 Git ref，再安装插件。
+`v0.2.0` 已发布，可将 marketplace 固定到该 Git ref，再安装插件。
 
 ```powershell
 claude plugin marketplace add Fucose/python-email-mcp#v0.2.0

@@ -13,7 +13,7 @@ codex plugin add python-email-mcp@fucose-plugins --json
 
 ## 安装已发布版本
 
-创建并发布 `v0.2.0` tag 后，从该 Git ref 安装 marketplace。
+`v0.2.0` 已发布，可从该 Git ref 安装 marketplace。
 
 ```powershell
 codex plugin marketplace add Fucose/python-email-mcp --ref v0.2.0
