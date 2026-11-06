@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import stat
+import sys
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
 
@@ -12,10 +14,27 @@ from .errors import ConfigurationError
 
 LOGGER = logging.getLogger(__name__)
 
-SETUP_COMMAND = (
-    'uvx --from "git+https://github.com/Fucose/python-email-mcp.git@v0.1.0" '
-    "python-email-mcp cli setup"
-)
+
+def get_setup_command(
+    python_executable: Optional[str] = None,
+    main_script: Optional[str] = None,
+    platform_name: Optional[str] = None,
+) -> str:
+    """Build a shell command that runs setup with this installation's code."""
+    executable = python_executable or sys.executable
+    script = main_script or str(Path(__file__).resolve().parent.parent / "main.py")
+    arguments = [executable, script, "cli", "setup"]
+    platform_name = os.name if platform_name is None else platform_name
+
+    if platform_name == "nt":
+        def quote(value: str) -> str:
+            return "'" + value.replace("'", "''") + "'"
+
+        return "& " + " ".join(quote(value) for value in arguments)
+    return shlex.join(arguments)
+
+
+SETUP_COMMAND = get_setup_command()
 
 FIELD_ENV_KEYS = {
     "email": "EMAIL_USER",

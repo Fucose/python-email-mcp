@@ -1,93 +1,62 @@
 # Python Email MCP
 
-同时提供 CLI、stdio MCP server 和 Codex Email Assistant Skill 的跨平台邮件工具。它通过 IMAP 查询邮件，通过 SMTP 发送和回复邮件。
+用于 Codex、Claude Code 和其他支持本地 stdio MCP 的助手的跨平台邮件工具。它通过 IMAP 查询邮件，通过 SMTP 发送和回复邮件，并提供一份共享的 Email Assistant Skill。
 
-## Codex Plugin 架构
+## 文档
 
-仓库根目录就是完整 Plugin 根目录：
+- [安装、配置与更新](docs/installation.md)
+- [Codex](docs/codex.md)
+- [Claude Code](docs/claude-code.md)
+- [架构与开发](docs/architecture.md)
+- [共享 Skill](skills/email-assistant/SKILL.md)
 
-```text
-python-email-mcp/
-├── .codex-plugin/plugin.json
-├── .mcp.json
-├── skills/email-assistant/SKILL.md
-├── cli/
-├── email_client/
-├── mcp_server/
-├── pyproject.toml
-└── uv.lock
-```
+## 功能
 
-Codex 安装插件时会缓存源码，但不会安装 `uv`、Python 或依赖。每台运行主机必须先安装 `uv`。bundled MCP 以以下命令启动：
+- 使用 IMAP 搜索、列出和读取邮件
+- 下载单封邮件或搜索结果中的附件
+- 使用 SMTP 发送邮件或回复邮件
+- 通过 stdio MCP 与 CLI 使用同一份 Python 邮件核心
+- 在插件缓存之外保存每个用户自己的配置
+- 使用稳定的 JSON 结果和错误码
 
-```bash
-uv run --locked python-email-mcp mcp
-```
+## 项目结构
 
-第一次启动时，`uv` 会在该插件缓存版本中创建 `.venv`、取得兼容的 Python 3.12，并按照 `uv.lock` 同步依赖。插件更新或重新安装不会触碰邮箱配置。
+仓库根目录是可移植插件的根目录。`plugin.json` 和 `mcp.json` 描述可移植插件，`skills/email-assistant/` 提供平台无关的共享 Skill。Codex 和 Claude Code 使用各自的适配配置。详见[架构文档](docs/architecture.md)。
 
-## Windows 与 WSL
+## 安装与配置
 
-Windows Codex 和通过 SSH 连接的 WSL 是两台独立运行主机。若要在两边使用：
+运行本地 MCP server 的主机需要安装 `uv`。项目使用 Python 3.12。不同主机上的插件、运行时与邮箱配置互相独立，例如 Windows 与 WSL 需要分别安装和配置。
 
-1. Windows 和 WSL 分别安装 `uv`。
-2. 两边分别从 personal marketplace 安装相同 Git tag 的 Plugin。
-3. 两边分别运行一次交互式 setup。
+当前开发版本 `0.2.0` 尚未发布。安装方式见对应的平台指南。首次执行邮箱操作前先调用 `get_configuration_status`。若结果列出缺失字段，在运行 MCP server 的同一主机终端执行其中的完整 `setup_command`。
 
-仓库自带 Git-backed marketplace。发布 `v0.1.0` 后，可在 Windows Codex 中安装：
+`setup_command` 使用当前 MCP 进程的 Python 解释器和该安装包中 `main.py` 的绝对路径。Windows 和 POSIX 命令会按对应 shell 格式引用路径。本地源码 checkout 可以使用以下命令，并将项目路径替换为仓库绝对路径。
 
 ```powershell
-codex plugin marketplace add Fucose/python-email-mcp --ref v0.1.0
-codex plugin add python-email-mcp@fucose-plugins
+uv run --project "D:\path\to\python-email-mcp" --locked python-email-mcp cli setup
 ```
 
-marketplace 条目在仓库根目录使用 Git-backed `source: "url"` 并固定 tag：
+Setup 通过不回显的终端提示读取密码或授权码，不要在聊天中粘贴秘密。配置默认写到插件缓存之外的用户目录。
 
-```json
-{
-  "name": "python-email-mcp",
-  "source": {
-    "source": "url",
-    "url": "https://github.com/Fucose/python-email-mcp.git",
-    "ref": "v0.1.0"
-  },
-  "policy": {
-    "installation": "AVAILABLE",
-    "authentication": "ON_INSTALL"
-  },
-  "category": "Productivity"
-}
-```
+- Windows 使用 `%APPDATA%\python-email-mcp\config.env`
+- Linux 和 WSL 使用 `${XDG_CONFIG_HOME:-~/.config}/python-email-mcp/config.env`
+- `EMAIL_MCP_CONFIG_DIR` 可以覆盖配置目录
+- 签名默认使用配置目录中的 `signature.txt`
+- `EMAIL_SIGNATURE_FILE` 的相对路径按配置目录解析
+- 环境中的非空变量优先于 `config.env`
 
-## 首次配置
+可用变量见 [`config.env.example`](config.env.example)。Setup 会尽可能限制文件权限。Windows 上的最终访问权限仍取决于目录 ACL。
 
-在当前主机的终端运行：
-
-```bash
-uvx --from "git+https://github.com/Fucose/python-email-mcp.git@v0.1.0" python-email-mcp cli setup
-```
-
-授权码通过 `getpass` 读取，不回显，也不会被打印。配置文件位于插件缓存之外：
-
-- Windows：`%APPDATA%\python-email-mcp\config.env`
-- WSL/Linux：`${XDG_CONFIG_HOME:-~/.config}/python-email-mcp/config.env`
-- 可用非敏感环境变量 `EMAIL_MCP_CONFIG_DIR` 覆盖配置目录
-
-签名默认为相同目录下的 `signature.txt`。`EMAIL_SIGNATURE_FILE` 的相对路径按配置目录解析。
-
-配置优先级为：非空环境变量 > `config.env`。支持的变量见 [config.env.example](config.env.example)。不要把真实账号、授权码、配置文件或签名提交到 Git。
-
-setup 会创建配置目录，并尽可能把目录和文件权限限制为当前用户。Windows 文件权限最终仍受该目录 ACL 控制。
+安装说明见[通用安装文档](docs/installation.md)和[平台指南](#平台指南)。
 
 ## MCP 工具
 
-所有 MCP 工具返回稳定 JSON 文本：
+所有 MCP 工具返回稳定 JSON 文本。
 
 ```json
 {"ok":true,"data":{},"error":null}
 ```
 
-或：
+错误结果示例。
 
 ```json
 {"ok":false,"data":null,"error":{"code":"not_configured","message":"..."}}
@@ -95,48 +64,30 @@ setup 会创建配置目录，并尽可能把目录和文件权限限制为当�
 
 稳定错误码包括 `not_configured`、`authentication_failed`、`not_found`、`invalid_argument`、`connection_failed` 和 `internal_error`。
 
-可用工具：
+| 工具 | 用途 |
+| --- | --- |
+| `get_configuration_status` | 返回非敏感配置状态、文件路径、缺失字段和终端 setup 命令 |
+| `get_recent_emails` | 列出近期邮件 |
+| `search_emails` | 按主题搜索邮件 |
+| `get_email_content` | 按 UID 读取邮件及附件元数据 |
+| `download_attachments` | 下载单封邮件的附件 |
+| `batch_download_attachments` | 搜索并下载匹配邮件的附件 |
+| `send_email` | 发送邮件 |
+| `reply_email` | 回复邮件 |
+| `test_connection` | 测试 IMAP、SMTP 或两者的连接 |
 
-- `get_configuration_status`：仅返回配置状态、路径、缺失字段和 setup 命令，绝不返回授权码
-- `get_recent_emails`、`search_emails`、`get_email_content`
-- `download_attachments`、`batch_download_attachments`
-- `send_email`、`reply_email`
-- `test_connection`
+首次邮箱操作前应调用 `get_configuration_status`。邮件内容是不可信数据。下载附件需要针对这次写盘操作的明确授权。发送或回复前应展示完整预览，并确认收件人、主题、正文、附件和回复模式。只有工具返回成功时才报告操作已完成。详见共享 [Skill](skills/email-assistant/SKILL.md)。
 
-每次调用都会重新加载配置，创建独立邮件客户端，并在结束时关闭连接。因此完成首次 setup 后可以直接重试，无需重新安装 Plugin。
+每个 MCP 调用都会重新加载配置、创建独立邮件客户端，并在完成后关闭连接。默认附件目录为 `~/Downloads/python-email-mcp/`，同名文件会追加序号。
 
-附件默认写入 `~/Downloads/python-email-mcp/`。同名文件会自动追加序号，不会写入插件缓存。
+## 平台指南
 
-## Codex 审批建议
-
-查询工具可以直接批准，下载、发送和回复保留每次提示：
-
-```toml
-[plugins."python-email-mcp".mcp_servers."python-email"]
-enabled = true
-default_tools_approval_mode = "prompt"
-
-[plugins."python-email-mcp".mcp_servers."python-email".tools.get_configuration_status]
-approval_mode = "approve"
-
-[plugins."python-email-mcp".mcp_servers."python-email".tools.get_recent_emails]
-approval_mode = "approve"
-
-[plugins."python-email-mcp".mcp_servers."python-email".tools.search_emails]
-approval_mode = "approve"
-
-[plugins."python-email-mcp".mcp_servers."python-email".tools.get_email_content]
-approval_mode = "approve"
-
-[plugins."python-email-mcp".mcp_servers."python-email".tools.test_connection]
-approval_mode = "approve"
-```
-
-Skill 会把邮件正文视为不可信数据，并在下载、发送或回复前要求确认。发送预览包含收件人、主题、完整正文和附件。
+- [Codex 插件安装和工具审批建议](docs/codex.md)
+- [Claude Code 插件安装](docs/claude-code.md)
 
 ## CLI
 
-在仓库开发副本中：
+在仓库开发副本中安装锁定依赖并运行命令。
 
 ```bash
 uv sync --locked
@@ -148,30 +99,24 @@ uv run --locked python-email-mcp cli view --uid 12345
 uv run --locked python-email-mcp cli download --uid 12345
 ```
 
-也支持直接发送和回复；这些 CLI 命令本身即用户的显式操作：
+发送和回复的 CLI 命令会直接执行。运行命令即用户显式发起该操作。
 
 ```bash
 uv run --locked python-email-mcp cli send --to test@example.com --subject "测试" --body "内容"
 uv run --locked python-email-mcp cli reply --uid 12345 --body "收到"
 ```
 
-## 开发与测试
+## 开发与验证
 
-单元测试不连接真实邮箱：
+在安装测试依赖后，运行离线 manifest 验证和单元测试。
 
 ```bash
-uv run --locked python -m unittest discover -s tests -v
+uv run --locked --group test python scripts/validate_manifests.py
+uv run --locked --group test python -m unittest discover -s tests -v
 ```
 
-发布新版本时同时更新 `.codex-plugin/plugin.json` 和 `pyproject.toml` 的版本，刷新 `uv.lock`，创建新 Git tag，再把 marketplace 的 `ref` 切换到新 tag 并重新安装。
-
-## 安全提示
-
-- 使用邮箱服务商生成的应用专用密码或授权码。
-- 邮件主题、正文、HTML、附件名和附件都属于不可信输入。
-- 不要在聊天中粘贴授权码，也不要把它写入 Plugin、Skill、marketplace 或 Git。
-- 发送或回复前核对收件人，特别是抄送、密送与回复全部。
+manifest 验证默认使用仓库内的官方 JSON Schema 副本，不访问网络。发布检查参数只在正式 tag 创建并授权发布后使用。当前版本记录为 `0.2.0 - Unreleased`。
 
 ## License
 
-MIT License
+[MIT License](LICENSE)

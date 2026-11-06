@@ -1,11 +1,21 @@
 import os
+import shlex
+import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from email_client.config import Config, get_default_config_dir, get_default_download_dir
+from email_client.config import (
+    SETUP_COMMAND,
+    Config,
+    get_default_config_dir,
+    get_default_download_dir,
+    get_setup_command,
+)
 
 
 class ConfigPathTests(unittest.TestCase):
@@ -130,6 +140,94 @@ class ConfigLoadingTests(unittest.TestCase):
             "smtp.example.com", 465, True,
         )
         self.assertEqual(stat.S_IMODE(config.env_file.stat().st_mode), 0o600)
+
+
+class SetupCommandTests(unittest.TestCase):
+    def test_status_command_uses_current_interpreter_and_bundled_main(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            status = Config(Path(temporary), environ={}).status()
+
+        command = status["setup_command"]
+        main_script = str((Path(__file__).resolve().parent.parent / "main.py").resolve())
+        self.assertEqual(command, SETUP_COMMAND)
+        self.assertEqual(command, get_setup_command())
+        self.assertIn(sys.executable, command)
+        self.assertIn(main_script, command)
+        self.assertNotIn("github.com", command)
+        self.assertNotIn("--from", command)
+
+        if os.name == "nt":
+            self.assertTrue(command.startswith("& "))
+        else:
+            self.assertEqual(
+                shlex.split(command),
+                [sys.executable, main_script, "cli", "setup"],
+            )
+
+    def test_setup_command_quotes_arguments_with_spaces_and_apostrophes(self):
+        executable = r"C:\Program Files\O'Brien\python.exe"
+        main_script = r"C:\Plugin Folder\Owner's Files\main.py"
+        powershell_command = get_setup_command(
+            executable, main_script, platform_name="nt"
+        )
+        self.assertEqual(
+            powershell_command,
+            "& 'C:\\Program Files\\O''Brien\\python.exe' "
+            "'C:\\Plugin Folder\\Owner''s Files\\main.py' 'cli' 'setup'",
+        )
+
+        posix_executable = "/tmp/Python O'Brien/bin/python"
+        posix_script = "/tmp/Plugin Owner's Folder/main.py"
+        posix_command = get_setup_command(
+            posix_executable, posix_script, platform_name="posix"
+        )
+        self.assertEqual(
+            shlex.split(posix_command),
+            [posix_executable, posix_script, "cli", "setup"],
+        )
+
+    @unittest.skipIf(os.name == "nt" and not (shutil.which("pwsh") or shutil.which("powershell")),
+                     "PowerShell is required to execute the generated setup command")
+    def test_generated_setup_command_help_runs_from_unrelated_directory(self):
+        with tempfile.TemporaryDirectory(prefix="email setup command ") as temporary:
+            temp_root = Path(temporary)
+            cwd = temp_root / "unrelated cwd with spaces and 'quotes'"
+            cwd.mkdir()
+            config_dir = temp_root / "isolated config with spaces and 'quotes'"
+            environment = os.environ.copy()
+            for key in tuple(environment):
+                if key.startswith("EMAIL_"):
+                    environment.pop(key)
+            environment["EMAIL_MCP_CONFIG_DIR"] = str(config_dir)
+
+            command = get_setup_command() + " --help"
+            if os.name == "nt":
+                shell = shutil.which("pwsh") or shutil.which("powershell")
+                process = subprocess.run(
+                    [shell, "-NoProfile", "-NonInteractive", "-Command", f"{command}; exit $LASTEXITCODE"],
+                    cwd=cwd,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+            else:
+                process = subprocess.run(
+                    ["/bin/sh", "-c", command],
+                    cwd=cwd,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertIn("usage:", process.stdout.casefold())
+            self.assertFalse(config_dir.exists())
 
 
 if __name__ == "__main__":

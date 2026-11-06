@@ -1,0 +1,13 @@
+{
+  "name": "python-email-mcp",
+  "version": "0.2.0",
+  "description": "An email assistant with IMAP/SMTP tools and safe email workflows.",
+  "author": {
+    "name": "Fucose",
+    "url": "https://github.com/Fucose"
+  },
+  "homepage": "https://github.com/Fucose/python-email-mcp",
+  "repository": "https://github.com/Fucose/python-email-mcp",
+  "license": "MIT",
+  "skills": "./skills/"
+}

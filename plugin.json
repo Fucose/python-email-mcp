@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "python-email-mcp",
+  "version": "0.2.0",
+  "description": "Email management through IMAP and SMTP, with an MCP server, CLI, and reusable Agent Skills.",
+  "author": {
+    "name": "Fucose",
+    "url": "https://github.com/Fucose"
+  },
+  "homepage": "https://github.com/Fucose/python-email-mcp",
+  "repository": "https://github.com/Fucose/python-email-mcp",
+  "license": "MIT",
+  "keywords": ["email", "imap", "smtp", "mcp", "agent-skills"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Python Email MCP",
+        "shortDescription": "Safely search, read, download, send, and reply to email.",
+        "longDescription": "A cross-platform email assistant with an IMAP/SMTP MCP server, external per-user configuration, and confirmation rules for actions that write files or send messages.",
+        "developerName": "Fucose",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/Fucose/python-email-mcp",
+        "defaultPrompt": [
+          "Check whether my email account is configured, then show recent messages.",
+          "Search my inbox for a subject and summarize the matching messages.",
+          "Draft an email and show me the complete preview before sending it."
+        ],
+        "brandColor": "#2563EB"
+      }
+    }
+  }
+}

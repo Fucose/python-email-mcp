@@ -2,8 +2,10 @@
   "mcpServers": {
     "python-email": {
       "command": "uv",
-      "args": ["run", "--locked", "python-email-mcp", "mcp"],
-      "cwd": "."
+      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT}", "--locked", "python-email-mcp", "mcp"],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv"
+      }
     }
   }
 }

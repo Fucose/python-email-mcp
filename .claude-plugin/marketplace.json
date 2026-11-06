@@ -1,0 +1,13 @@
+{
+  "name": "fucose-plugins",
+  "description": "Fucose's Agent plugins.",
+  "owner": {
+    "name": "Fucose"
+  },
+  "plugins": [
+    {
+      "name": "python-email-mcp",
+      "source": "./"
+    }
+  ]
+}
