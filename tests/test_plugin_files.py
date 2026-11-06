@@ -28,6 +28,7 @@ class PluginFileTests(unittest.TestCase):
         directories = (
             ".agents",
             ".claude-plugin",
+            "integrations",
             "scripts",
             "skills",
         )
@@ -85,7 +86,31 @@ class PluginFileTests(unittest.TestCase):
         self.assertEqual(interface["displayName"], "Python Email MCP")
         self.assertEqual(interface["capabilities"], ["Read", "Write"])
         self.assertFalse((self.root / ".codex-plugin").exists())
-        self.assertFalse((self.root / "integrations").exists())
+        self.assertEqual(
+            sorted(path.name for path in (self.root / "integrations").iterdir()),
+            ["dsh"],
+        )
+
+    def test_dsh_bundle_must_resolve_the_checkout_at_load_time(self):
+        def mutate(root):
+            path = root / "integrations" / "dsh" / "cordis.patch.yml"
+            document = path.read_text(encoding="utf-8")
+            path.write_text(
+                document.replace("&repo_root !!js ", "&repo_root ", 1), encoding="utf-8"
+            )
+
+        with self.assertRaises(ValueError):
+            self.validator.validate(root=self._mutated_root(mutate))
+
+    def test_dsh_bundle_must_register_the_shared_skill_provider(self):
+        def mutate(root):
+            path = root / "integrations" / "dsh" / "cordis.patch.yml"
+            document = path.read_text(encoding="utf-8")
+            head, _, _ = document.partition("    - id: python-email-mcp-skills")
+            path.write_text(head, encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self.validator.validate(root=self._mutated_root(mutate))
 
     def test_wrong_manifest_version_fails_validation(self):
         def mutate(root):

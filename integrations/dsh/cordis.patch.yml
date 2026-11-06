@@ -1,0 +1,37 @@
+# DeepSeek Harness bundle for python-email-mcp.
+#
+# Installed with the Harness plugin manager from this directory:
+#   install_bundle target = <checkout>/integrations/dsh
+#
+# The bundle registers two rows:
+#   python-email-mcp        - stdio MCP client for the repository's MCP server
+#   python-email-mcp-skills - filesystem Skill provider for skills/
+#
+# The checkout path is resolved when the Harness loads the patch, so the bundle
+# works for any user and host that clones the repository. It defaults to
+# ~/projects/python-email-mcp; set PYTHON_EMAIL_MCP_ROOT before starting the
+# Harness when the checkout lives somewhere else.
+- insert:
+    - id: python-email-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: python-email
+        transport: stdio
+        command: uv
+        args:
+          - run
+          - --project
+          - &repo_root !!js "process.env.PYTHON_EMAIL_MCP_ROOT || `${process.env.HOME || process.env.USERPROFILE}/projects/python-email-mcp`"
+          - --locked
+          - python-email-mcp
+          - mcp
+        cwd: *repo_root
+        failOnStartupError: true
+        toolCallTimeoutMs: 120000
+    - id: python-email-mcp-skills
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: python-email
+        includeDefaultRoots: false
+        customSkillDirs:
+          - !!js "`${process.env.PYTHON_EMAIL_MCP_ROOT || `${process.env.HOME || process.env.USERPROFILE}/projects/python-email-mcp`}/skills`"

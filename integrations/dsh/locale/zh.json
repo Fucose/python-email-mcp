@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Python 邮件桥接",
+    "description": "连接 python-email MCP 服务与共享的邮件助手技能，让智能体可以列出、搜索、阅读邮件，并通过 IMAP 与 SMTP 发送或回复。"
+  }
+}

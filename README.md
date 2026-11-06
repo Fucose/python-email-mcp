@@ -1,12 +1,13 @@
 # Python Email MCP
 
-用于 Codex、Claude Code 和其他支持本地 stdio MCP 的助手的跨平台邮件工具。它通过 IMAP 查询邮件，通过 SMTP 发送和回复邮件，并提供一份共享的 Email Assistant Skill。
+用于 Codex、Claude Code、DeepSeek Harness 和其他支持本地 stdio MCP 的助手的跨平台邮件工具。它通过 IMAP 查询邮件，通过 SMTP 发送和回复邮件，并提供一份共享的 Email Assistant Skill。
 
 ## 文档
 
 - [安装、配置与更新](docs/installation.md)
 - [Codex](docs/codex.md)
 - [Claude Code](docs/claude-code.md)
+- [DeepSeek Harness](docs/dsh.md)
 - [架构与开发](docs/architecture.md)
 - [共享 Skill](skills/email-assistant/SKILL.md)
 
@@ -21,7 +22,7 @@
 
 ## 项目结构
 
-仓库根目录是可移植插件的根目录。`plugin.json` 和 `mcp.json` 描述可移植插件，`skills/email-assistant/` 提供平台无关的共享 Skill。Codex 和 Claude Code 使用各自的适配配置。详见[架构文档](docs/architecture.md)。
+仓库根目录是可移植插件的根目录。`plugin.json` 和 `mcp.json` 描述可移植插件，`skills/email-assistant/` 提供平台无关的共享 Skill。Codex 和 Claude Code 使用各自的适配配置，DeepSeek Harness 使用 `integrations/dsh/` 中的 bundle。详见[架构文档](docs/architecture.md)。
 
 ## 安装与配置
 
@@ -84,6 +85,7 @@ Setup 通过不回显的终端提示读取密码或授权码，不要在聊天�
 
 - [Codex 插件安装和工具审批建议](docs/codex.md)
 - [Claude Code 插件安装](docs/claude-code.md)
+- [DeepSeek Harness bundle 安装](docs/dsh.md)
 
 ## CLI
 

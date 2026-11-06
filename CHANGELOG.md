@@ -2,7 +2,7 @@
 
 ## 0.2.0 - Unreleased
 
-- Package a portable Agent Plugin with Codex and Claude Code integrations while keeping one shared Python CLI and MCP server.
+- Package a portable Agent Plugin with Codex and Claude Code integrations and a DeepSeek Harness bundle, while keeping one shared Python CLI and MCP server.
 - Add a shared, platform-independent Email Assistant Skill and move host-specific installation and approval guidance into platform documentation.
 - Add Windows, Linux, and WSL setup guidance and clarify per-host configuration and relative-path behavior.
 - Add offline manifest validation and document local development and release checks.

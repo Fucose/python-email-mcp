@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Python email bridge",
+    "description": "Connects the python-email MCP server and the shared Email Assistant skill, so the agent can list, search, read, and send mail over IMAP and SMTP."
+  }
+}

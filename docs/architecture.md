@@ -1,6 +1,6 @@
 # 架构与开发
 
-CLI 和 stdio MCP server 共用一套 Python 实现。Codex 与 Claude Code 使用各自的插件清单连接相同的 MCP server，并加载同一份 `email-assistant` Skill。
+CLI 和 stdio MCP server 共用一套 Python 实现。Codex、Claude Code 和 DeepSeek Harness 使用各自的插件清单或 bundle 连接相同的 MCP server，并加载同一份 `email-assistant` Skill。
 
 ## 文件布局
 
@@ -13,6 +13,7 @@ CLI 和 stdio MCP server 共用一套 Python 实现。Codex 与 Claude Code 使�
 | `.claude-plugin/plugin.json` | Claude Code 插件元数据 |
 | `.claude-plugin/marketplace.json` | Claude Code marketplace 项目 |
 | `.mcp.json` | Claude Code 插件的本地 MCP server 配置 |
+| `integrations/dsh/` | DeepSeek Harness bundle：MCP client 与共享 Skill provider |
 | `cli/`、`email_client/`、`mcp_server/` | 共用 CLI、邮件客户端、配置逻辑和 MCP server |
 
 ## MCP 配置分发
@@ -21,6 +22,7 @@ CLI 和 stdio MCP server 共用一套 Python 实现。Codex 与 Claude Code 使�
 | --- | --- | --- |
 | Agent Plugins 1.0 与 Codex | 根目录 `plugin.json` 和 `mcp.json` | 从根目录可移植清单发现共享 Skill 和 `python-email` server |
 | Claude Code | `.claude-plugin/plugin.json` 和 `.mcp.json` | 从原生 Claude Code 清单读取本地 MCP server，并加载根目录共享 Skill |
+| DeepSeek Harness | `integrations/dsh/cordis.patch.yml` | 由 bundle 注册 `python-email` stdio server 和共享 Skill provider |
 
 两个清单注册的 MCP server 名均为 `python-email`。客户端按其原生插件格式选择对应的一份配置，无需再手动添加同一 server。
 
@@ -43,7 +45,7 @@ uv run --locked --group test python scripts/validate_manifests.py
 uv run --locked --group test python -m unittest discover -s tests -v
 ```
 
-清单验证默认使用 `scripts/schemas/` 中的官方 JSON Schema 副本。Claude Code 未安装在开发环境中，因此没有声明其实际运行时已通过验证。离线清单验证和单元测试不连接真实邮箱。
+清单验证默认使用 `scripts/schemas/` 中的官方 JSON Schema 副本。Claude Code 未安装在开发环境中，因此没有声明其实际运行时已通过验证。DeepSeek Harness bundle 已在 WSL 上的 Harness 中安装并验证：工具通过 `mcp__python-email__*` 注册，共享 Skill 由本仓库的 `skills/` 提供，`get_configuration_status` 与 `test_connection` 均成功。离线清单验证和单元测试不连接真实邮箱。
 
 ## 版本维护与发布检查
 
