@@ -161,7 +161,7 @@ class SetupCommandTests(unittest.TestCase):
         else:
             self.assertEqual(
                 shlex.split(command),
-                [sys.executable, main_script, "cli", "setup"],
+                [sys.executable, "-X", "utf8", main_script, "cli", "setup"],
             )
 
     def test_setup_command_quotes_arguments_with_spaces_and_apostrophes(self):
@@ -172,7 +172,7 @@ class SetupCommandTests(unittest.TestCase):
         )
         self.assertEqual(
             powershell_command,
-            "& 'C:\\Program Files\\O''Brien\\python.exe' "
+            "& 'C:\\Program Files\\O''Brien\\python.exe' '-X' 'utf8' "
             "'C:\\Plugin Folder\\Owner''s Files\\main.py' 'cli' 'setup'",
         )
 
@@ -183,7 +183,7 @@ class SetupCommandTests(unittest.TestCase):
         )
         self.assertEqual(
             shlex.split(posix_command),
-            [posix_executable, posix_script, "cli", "setup"],
+            [posix_executable, "-X", "utf8", posix_script, "cli", "setup"],
         )
 
     @unittest.skipIf(os.name == "nt" and not (shutil.which("pwsh") or shutil.which("powershell")),
@@ -198,7 +198,12 @@ class SetupCommandTests(unittest.TestCase):
             for key in tuple(environment):
                 if key.startswith("EMAIL_"):
                     environment.pop(key)
+            environment.pop("PYTHONIOENCODING", None)
             environment["EMAIL_MCP_CONFIG_DIR"] = str(config_dir)
+            environment["PYTHONUTF8"] = "0"
+            environment["PYTHONCOERCECLOCALE"] = "0"
+            if os.name != "nt":
+                environment["LC_ALL"] = "C"
 
             command = get_setup_command() + " --help"
             if os.name == "nt":
@@ -227,6 +232,7 @@ class SetupCommandTests(unittest.TestCase):
 
             self.assertEqual(process.returncode, 0, process.stderr)
             self.assertIn("usage:", process.stdout.casefold())
+            self.assertIn("不询问直接覆盖", process.stdout)
             self.assertFalse(config_dir.exists())
 
 

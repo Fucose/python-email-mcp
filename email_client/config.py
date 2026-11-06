@@ -23,7 +23,7 @@ def get_setup_command(
     """Build a shell command that runs setup with this installation's code."""
     executable = python_executable or sys.executable
     script = main_script or str(Path(__file__).resolve().parent.parent / "main.py")
-    arguments = [executable, script, "cli", "setup"]
+    arguments = [executable, "-X", "utf8", script, "cli", "setup"]
     platform_name = os.name if platform_name is None else platform_name
 
     if platform_name == "nt":
