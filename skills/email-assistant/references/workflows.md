@@ -23,12 +23,14 @@ Prefer absolute paths for attachment files and explicit download folders. Relati
 
 ## Send email
 
-`send_email` takes `to`, `subject`, and `text`. Optional `cc`, `bcc`, and `attachments` are lists. Draft first, then show all recipients, the subject, the full body, and every attachment path. Get explicit confirmation for that exact preview before calling the tool. If any detail changes, show the revised preview and get confirmation again.
+Call `preview_email` with `to`, `subject`, and `text`. Optional `cc`, `bcc`, and `attachments` are lists. Show the returned `email` fields, including all recipients, the subject, the final full body with its signature, and every attachment path. After explicit confirmation, call `send_email` with the same original arguments and the returned `preview_id`. If any detail changes, request a new preview and confirmation.
 
 ## Reply to email
 
-`reply_email` takes a message `uid` and `text`, with optional `reply_all` and `attachments`. Read the original message when needed to determine the actual destination. Preview the derived To, Cc, and Bcc recipients, whether reply-all is enabled, the derived subject, the full reply body, and every attachment path. Get explicit confirmation for that exact preview before calling the tool. If a field or derived recipient changes, preview and confirm again.
+Call `preview_reply` with a message `uid` and `text`, with optional `reply_all` and `attachments`. Show the returned derived To, Cc, and Bcc recipients, reply-all state, subject, full body including signature and quoted original, and every attachment path. After explicit confirmation, call `reply_email` with the same original arguments and returned `preview_id`. Reply recipients prefer `Reply-To`, falling back to `From`. If a field or derived recipient changes, request a new preview and confirmation.
 
 ## Check results
 
 Tool results use a stable JSON envelope with `ok`, `data`, and `error`. Check `ok` and the operation fields in `data` before describing an action as successful. If the call returns an error or no success result, report that outcome without implying completion. For downloads, use the returned file paths. For sending and replying, require a success result from the tool.
+
+An SMTP success reports server acceptance. A `delivery_failed` error includes per-recipient `accepted`, `rejected`, and `unknown` results in `error.details`. Report partial acceptance and unknown outcomes explicitly, and reconcile these outcomes before attempting another send.

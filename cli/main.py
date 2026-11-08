@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from email_client import Config, EmailClient, EmailClientError, get_default_download_dir
+from email_client import Config, DeliveryError, EmailClient, EmailClientError, get_default_download_dir
 
 
 def _with_client(operation):
@@ -18,13 +20,19 @@ def _with_client(operation):
         client.disconnect()
 
 
+def _display_date(value: datetime, pattern: str = "%Y-%m-%d %H:%M") -> str:
+    if value == datetime.min:
+        return "日期不详"
+    return value.strftime(pattern)
+
+
 def cmd_list(args):
     def run(client):
         messages = client.get_recent_emails(days=args.days, limit=args.limit)
         print(f"最近 {args.days} 天的邮件：{len(messages)} 封")
         for message in messages:
             print(f"UID: {message.uid}")
-            print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M')}")
+            print(f"日期: {_display_date(message.date)}")
             print(f"发件人: {message.from_}")
             print(f"主题: {message.subject}")
             print("-" * 50)
@@ -38,7 +46,7 @@ def cmd_search(args):
         print(f"搜索结果：{len(messages)} 封")
         for message in messages:
             print(f"UID: {message.uid}")
-            print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M')}")
+            print(f"日期: {_display_date(message.date)}")
             print(f"发件人: {message.from_}")
             print(f"主题: {message.subject}")
             print("-" * 50)
@@ -53,7 +61,7 @@ def cmd_view(args):
             print(f"未找到 UID 为 {args.uid} 的邮件")
             return
         print(f"UID: {message.uid}")
-        print(f"日期: {message.date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"日期: {_display_date(message.date, '%Y-%m-%d %H:%M:%S')}")
         print(f"发件人: {message.from_}")
         print(f"收件人: {message.to}")
         if message.cc:
@@ -265,6 +273,8 @@ def main():
         raise SystemExit(130)
     except (EmailClientError, OSError, ValueError) as exc:
         print(f"错误: {exc}", file=sys.stderr)
+        if isinstance(exc, DeliveryError):
+            print(json.dumps(exc.details, ensure_ascii=False), file=sys.stderr)
         if args.verbose:
             raise
         raise SystemExit(1)

@@ -44,3 +44,25 @@ class InvalidArgumentError(EmailClientError):
     """Raised when a caller supplies an invalid argument."""
 
     code = "invalid_argument"
+
+
+class DeliveryError(EmailClientError):
+    """Report SMTP acceptance, rejection, and uncertain outcomes per recipient."""
+
+    code = "delivery_failed"
+
+    def __init__(
+        self,
+        status: str,
+        accepted: list[str],
+        rejected: dict[str, dict],
+        unknown: list[str],
+        message: str,
+    ):
+        self.details = {
+            "status": status,
+            "accepted": accepted,
+            "rejected": rejected,
+            "unknown": unknown,
+        }
+        super().__init__(message)

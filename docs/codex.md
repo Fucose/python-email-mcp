@@ -47,6 +47,12 @@ approval_mode = "approve"
 [plugins."python-email-mcp".mcp_servers."python-email".tools.get_email_content]
 approval_mode = "approve"
 
+[plugins."python-email-mcp".mcp_servers."python-email".tools.preview_email]
+approval_mode = "approve"
+
+[plugins."python-email-mcp".mcp_servers."python-email".tools.preview_reply]
+approval_mode = "approve"
+
 [plugins."python-email-mcp".mcp_servers."python-email".tools.test_connection]
 approval_mode = "approve"
 ```

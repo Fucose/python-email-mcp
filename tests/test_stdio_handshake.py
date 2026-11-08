@@ -25,6 +25,8 @@ EXPECTED_TOOLS = {
     "get_email_content",
     "download_attachments",
     "batch_download_attachments",
+    "preview_email",
+    "preview_reply",
     "send_email",
     "reply_email",
     "test_connection",

@@ -3,15 +3,23 @@
 import imaplib
 import email
 import logging
+import re
+import ssl
 from email.header import decode_header
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from .errors import AuthenticationError, NotFoundError, TransportError
+from .errors import AuthenticationError, InvalidArgumentError, NotFoundError, TransportError
 from .models import Email, Attachment
 
 LOGGER = logging.getLogger(__name__)
+
+_IMAP_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)
+_MAX_UID = 4_294_967_295
 
 
 class IMAPClient:
@@ -26,14 +34,14 @@ class IMAPClient:
             port: IMAP端口
             user: 邮箱账号
             password: 密码或授权码
-            ssl: 是否使用SSL
+            ssl: 是否使用隐式TLS；为False时仍要求STARTTLS
         """
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         self.ssl = ssl
-        self.client: Optional[imaplib.IMAP4_SSL] = None
+        self.client: Optional[imaplib.IMAP4] = None
 
     def connect(self) -> bool:
         """
@@ -43,40 +51,42 @@ class IMAPClient:
             bool: 是否成功连接
         """
         try:
-            client_class = imaplib.IMAP4_SSL if self.ssl else imaplib.IMAP4
-            self.client = client_class(self.host, self.port)
-        except (OSError, imaplib.IMAP4.error) as exc:
-            self.client = None
-            raise TransportError(f"Unable to connect to IMAP server: {exc}") from exc
+            context = ssl.create_default_context()
+            if self.ssl:
+                self.client = imaplib.IMAP4_SSL(
+                    self.host, self.port, ssl_context=context
+                )
+            else:
+                self.client = imaplib.IMAP4(self.host, self.port)
+                self.client.starttls(ssl_context=context)
 
-        try:
-            self.client.login(self.user, self.password)
-        except imaplib.IMAP4.error as exc:
-            self.disconnect()
-            raise AuthenticationError("IMAP authentication failed") from exc
+            try:
+                self.client.login(self.user, self.password)
+            except imaplib.IMAP4.abort as exc:
+                raise TransportError(f"Unable to authenticate to IMAP server: {exc}") from exc
+            except imaplib.IMAP4.error as exc:
+                raise AuthenticationError("IMAP authentication failed") from exc
 
-        try:
-            status, _ = self.client.select('INBOX')
+            status, _ = self.client.select('INBOX', readonly=True)
             if status != 'OK':
                 raise TransportError("IMAP server did not select INBOX")
-        except Exception:
+        except (AuthenticationError, TransportError):
             self.disconnect()
             raise
+        except Exception as exc:
+            self.disconnect()
+            raise TransportError(f"Unable to connect to IMAP server: {exc}") from exc
         return True
 
     def disconnect(self):
         """断开IMAP连接"""
         if self.client:
             try:
-                if getattr(self.client, "state", None) == "SELECTED":
-                    self.client.close()
-            except Exception:
-                pass
-            try:
                 self.client.logout()
             except Exception:
                 pass
-            self.client = None
+            finally:
+                self.client = None
 
     def get_recent_emails(self, days: int = 3, limit: int = 20) -> List[Email]:
         """
@@ -94,14 +104,14 @@ class IMAPClient:
 
         try:
             # 计算日期范围
-            since_date = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+            since_date = self._format_imap_date(datetime.now() - timedelta(days=days))
 
             # 使用 UID 搜索邮件（获取真实 UID）
             status, messages = self.client.uid('SEARCH', None, f'(SINCE {since_date})')
             if status != 'OK':
                 raise TransportError("IMAP search failed")
 
-            email_uids = messages[0].split()
+            email_uids = self._uids_from_search_response(messages)
 
             # 获取最近的邮件（从最后开始）
             recent_uids = email_uids[-limit:] if len(email_uids) > limit else email_uids
@@ -114,7 +124,7 @@ class IMAPClient:
 
             return emails
 
-        except (AuthenticationError, TransportError):
+        except (AuthenticationError, InvalidArgumentError, TransportError):
             raise
         except Exception as exc:
             raise TransportError(f"Unable to list email: {exc}") from exc
@@ -130,22 +140,31 @@ class IMAPClient:
         Returns:
             List[Email]: 匹配的邮件列表
         """
+        self._validate_search_keyword(keyword)
+
         if not self.client:
             self.connect()
 
         try:
             # 计算日期范围
-            since_date = (datetime.now() - timedelta(days=days)).strftime("%d-%b-%Y")
+            since_date = self._format_imap_date(datetime.now() - timedelta(days=days))
 
-            # 使用 UID 搜索邮件
-            escaped_keyword = keyword.replace('\\', '\\\\').replace('"', '\\"')
-            status, messages = self.client.uid(
-                'SEARCH', None, f'(SUBJECT "{escaped_keyword}" SINCE {since_date})'
-            )
+            # IMAP literals safely carry UTF-8 search text without quoting it into
+            # the command line, where quotes and command separators are ambiguous.
+            self.client.literal = keyword.encode('utf-8')
+            # imaplib emits its literal after every argument, so SUBJECT must
+            # be the final criterion before that literal.
+            search_args = ('SINCE', since_date, 'SUBJECT')
+            if getattr(self.client, 'utf8_enabled', False):
+                status, messages = self.client.uid('SEARCH', *search_args)
+            else:
+                status, messages = self.client.uid(
+                    'SEARCH', 'CHARSET', 'UTF-8', *search_args
+                )
             if status != 'OK':
                 raise TransportError("IMAP subject search failed")
 
-            email_uids = messages[0].split()
+            email_uids = self._uids_from_search_response(messages)
 
             emails = []
             for email_uid in reversed(email_uids):
@@ -155,10 +174,13 @@ class IMAPClient:
 
             return emails
 
-        except (AuthenticationError, TransportError):
+        except (AuthenticationError, InvalidArgumentError, TransportError):
             raise
         except Exception as exc:
             raise TransportError(f"Unable to search email: {exc}") from exc
+        finally:
+            if self.client is not None and getattr(self.client, 'literal', None) is not None:
+                self.client.literal = None
 
     def get_email_content(self, uid: str) -> Optional[Email]:
         """
@@ -170,12 +192,13 @@ class IMAPClient:
         Returns:
             Optional[Email]: 邮件对象，失败返回None
         """
+        uid = self._validate_uid(uid)
         if not self.client:
             self.connect()
 
         try:
             return self._fetch_email_by_uid(uid, full=True)
-        except (AuthenticationError, TransportError):
+        except (AuthenticationError, InvalidArgumentError, TransportError):
             raise
         except Exception as exc:
             raise TransportError(f"Unable to read email: {exc}") from exc
@@ -191,6 +214,7 @@ class IMAPClient:
         Returns:
             List[Path]: 下载的文件路径列表
         """
+        uid = self._validate_uid(uid)
         if not self.client:
             self.connect()
 
@@ -199,12 +223,14 @@ class IMAPClient:
 
         try:
             # 使用 UID 获取邮件
-            status, msg_data = self.client.uid('FETCH', uid, '(RFC822)')
+            status, msg_data = self.client.uid('FETCH', uid, '(BODY.PEEK[])')
             if status != 'OK':
-                raise NotFoundError(f"Email UID {uid} was not found")
+                raise TransportError(f"Unable to fetch email UID {uid}")
 
             # 解析邮件
-            raw_email = msg_data[0][1]
+            raw_email = self._fetch_payload(msg_data)
+            if raw_email is None:
+                raise NotFoundError(f"Email UID {uid} was not found")
             msg = email.message_from_bytes(raw_email)
 
             downloaded_files = []
@@ -244,7 +270,7 @@ class IMAPClient:
 
             return downloaded_files
 
-        except (AuthenticationError, NotFoundError, TransportError):
+        except (AuthenticationError, InvalidArgumentError, NotFoundError, TransportError):
             raise
         except Exception as exc:
             raise TransportError(f"Unable to download attachments: {exc}") from exc
@@ -260,38 +286,49 @@ class IMAPClient:
         Returns:
             List[Path]: 所有下载的文件路径列表
         """
+        validated_uids = [self._validate_uid(uid) for uid in uids]
         all_files = []
 
-        for uid in uids:
+        for uid in validated_uids:
             files = self.download_attachments(uid, folder)
             all_files.extend(files)
 
         return all_files
 
-    def _fetch_email_by_uid(self, email_uid: bytes, full: bool = False) -> Optional[Email]:
+    def _fetch_email_by_uid(self, email_uid: str | bytes, full: bool = False) -> Optional[Email]:
         """
         根据UID获取邮件
 
         Args:
-            email_uid: 邮件UID（bytes类型）
+            email_uid: 邮件UID
             full: 是否获取完整内容（包括正文和附件）
 
         Returns:
             Optional[Email]: 邮件对象
         """
+        email_uid = self._validate_uid(email_uid)
+        if not self.client:
+            raise TransportError("IMAP client is not connected")
+
         try:
             if full:
-                # 使用 UID 获取完整邮件
-                status, msg_data = self.client.uid('FETCH', email_uid, '(RFC822)')
+                # BODY.PEEK avoids setting the Seen flag while retrieving content.
+                status, msg_data = self.client.uid('FETCH', email_uid, '(BODY.PEEK[])')
             else:
-                # 使用 UID 只获取头部信息
-                status, msg_data = self.client.uid('FETCH', email_uid, '(BODY.PEEK[HEADER])')
+                status, msg_data = self.client.uid(
+                    'FETCH', email_uid, '(BODY.PEEK[HEADER])'
+                )
+        except Exception as exc:
+            raise TransportError(f"Unable to fetch email UID {email_uid}: {exc}") from exc
 
-            if status != 'OK':
-                return None
+        if status != 'OK':
+            raise TransportError(f"Unable to fetch email UID {email_uid}")
 
-            # 解析邮件
-            raw_email = msg_data[0][1]
+        raw_email = self._fetch_payload(msg_data)
+        if raw_email is None:
+            return None
+
+        try:
             msg = email.message_from_bytes(raw_email)
 
             # 提取基本信息
@@ -305,20 +342,23 @@ class IMAPClient:
             try:
                 date_tuple = email.utils.parsedate_tz(date_str)
                 if date_tuple:
-                    date = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple))
+                    parsed_date = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple))
                 else:
-                    date = datetime.now()
+                    parsed_date = datetime.min
             except Exception:
-                date = datetime.now()
+                parsed_date = datetime.min
 
             # 创建邮件对象，使用真实的 IMAP UID
             email_obj = Email(
-                uid=email_uid.decode() if isinstance(email_uid, bytes) else str(email_uid),
+                uid=email_uid,
                 subject=subject,
                 from_=from_,
                 to=to,
                 cc=cc if cc else None,
-                date=date
+                date=parsed_date,
+                reply_to=self._optional_header(msg, 'Reply-To'),
+                message_id=self._optional_header(msg, 'Message-ID'),
+                references=self._optional_header(msg, 'References'),
             )
 
             # 如果需要完整内容，提取正文和附件
@@ -326,10 +366,74 @@ class IMAPClient:
                 self._extract_body_and_attachments(msg, email_obj)
 
             return email_obj
-
+        except TransportError:
+            raise
         except Exception as exc:
-            LOGGER.warning("Unable to parse email UID %s: %s", email_uid, exc)
+            raise TransportError(f"Unable to parse email UID {email_uid}: {exc}") from exc
+
+    @staticmethod
+    def _validate_uid(uid, *, server_response: bool = False) -> str:
+        """Return a canonical decimal UID or reject it before issuing a command."""
+        error_type = TransportError if server_response else InvalidArgumentError
+        if isinstance(uid, bytes):
+            try:
+                uid = uid.decode('ascii')
+            except UnicodeDecodeError as exc:
+                raise error_type("IMAP UID must contain only ASCII decimal digits") from exc
+        if not isinstance(uid, str) or not uid or any(char < '0' or char > '9' for char in uid):
+            raise error_type("IMAP UID must contain only ASCII decimal digits")
+
+        normalized = uid.lstrip('0') or '0'
+        if len(normalized) > 10 or int(normalized) < 1 or int(normalized) > _MAX_UID:
+            raise error_type(f"IMAP UID must be between 1 and {_MAX_UID}")
+        return normalized
+
+    @staticmethod
+    def _format_imap_date(value: date) -> str:
+        """Format an IMAP date using protocol month names independent of locale."""
+        return f"{value.day:02d}-{_IMAP_MONTHS[value.month - 1]}-{value.year:04d}"
+
+    @staticmethod
+    def _validate_search_keyword(keyword: str) -> None:
+        if not isinstance(keyword, str):
+            raise InvalidArgumentError("IMAP subject keyword must be text")
+        if any(char in keyword for char in ('\r', '\n', '\x00')):
+            raise InvalidArgumentError("IMAP subject keyword cannot contain CR, LF, or NUL")
+
+    @staticmethod
+    def _uids_from_search_response(messages) -> List[str]:
+        if not messages or messages[0] is None:
+            return []
+        response = messages[0]
+        if isinstance(response, bytes):
+            uids = response.split()
+        elif isinstance(response, str):
+            uids = response.split()
+        else:
+            raise TransportError("IMAP search returned a malformed UID list")
+        return [IMAPClient._validate_uid(uid, server_response=True) for uid in uids]
+
+    @staticmethod
+    def _fetch_payload(msg_data) -> Optional[bytes]:
+        if not msg_data:
             return None
+        for item in msg_data:
+            if item is None:
+                continue
+            if isinstance(item, tuple) and len(item) >= 2:
+                payload = item[1]
+                if payload is None:
+                    continue
+                if isinstance(payload, bytes):
+                    return payload
+            raise TransportError("IMAP FETCH returned a malformed message payload")
+        return None
+
+    @classmethod
+    def _optional_header(cls, msg, name: str) -> Optional[str]:
+        value = msg.get(name, '')
+        value = cls._decode_str(value).strip()
+        return value or None
 
     def _extract_body_and_attachments(self, msg, email_obj: Email):
         """
@@ -419,6 +523,9 @@ class IMAPClient:
         if not header_value:
             return ''
 
+        # Unfold only legal header continuations. Other line breaks remain for
+        # callers such as SMTP validation to reject.
+        header_value = re.sub(r'\r?\n[ \t]+', ' ', header_value)
         decoded_list = decode_header(header_value)
         result = ''
 

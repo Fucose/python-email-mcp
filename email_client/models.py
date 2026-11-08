@@ -26,6 +26,9 @@ class Email:
     html_body: Optional[str] = None
     cc: Optional[str] = None
     attachments: List[Attachment] = field(default_factory=list)
+    reply_to: Optional[str] = None
+    message_id: Optional[str] = None
+    references: Optional[str] = None
 
     def __repr__(self):
         return f"Email(uid={self.uid}, subject='{self.subject}', from='{self.from_}')"

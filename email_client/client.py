@@ -9,6 +9,7 @@ from .config import Config, get_default_download_dir
 from .errors import EmailClientError, NotFoundError
 from .imap_client import IMAPClient
 from .models import Email
+from .outgoing import PreparedEmail
 from .smtp_client import SMTPClient
 
 
@@ -70,6 +71,32 @@ class EmailClient:
     ) -> bool:
         return self._smtp().send_email(to, subject, body, attachments, cc, bcc)
 
+    def prepare_email(
+        self,
+        to: List[str],
+        subject: str,
+        body: str,
+        attachments: Optional[List[Path]] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+    ) -> PreparedEmail:
+        return self._smtp().prepare_email(to, subject, body, attachments, cc, bcc)
+
+    def prepare_reply(
+        self,
+        uid: str,
+        body: str,
+        attachments: Optional[List[Path]] = None,
+        reply_all: bool = False,
+    ) -> PreparedEmail:
+        original_email = self.get_email(uid)
+        if not original_email:
+            raise NotFoundError(f"Email UID {uid} was not found")
+        return self._smtp().prepare_reply(original_email, body, attachments, reply_all)
+
+    def send_prepared_email(self, plan: PreparedEmail) -> bool:
+        return self._smtp().send_prepared_email(plan)
+
     def reply(
         self,
         uid: str,
@@ -77,10 +104,8 @@ class EmailClient:
         attachments: Optional[List[Path]] = None,
         reply_all: bool = False,
     ) -> bool:
-        original_email = self.get_email(uid)
-        if not original_email:
-            raise NotFoundError(f"Email UID {uid} was not found")
-        return self._smtp().reply_email(original_email, body, attachments, reply_all)
+        plan = self.prepare_reply(uid, body, attachments, reply_all)
+        return self.send_prepared_email(plan)
 
     def disconnect(self) -> None:
         """Close all open connections; safe to call more than once."""
@@ -95,7 +120,6 @@ class EmailClient:
         if self.imap_client is None:
             host, port, user, password, use_ssl = self.config.get_imap_config()
             candidate = IMAPClient(host, port, user, password, use_ssl)
-            candidate.connect()
             self.imap_client = candidate
         return self.imap_client
 
@@ -103,7 +127,6 @@ class EmailClient:
         if self.smtp_client is None:
             host, port, user, password, use_ssl = self.config.get_smtp_config()
             candidate = SMTPClient(host, port, user, password, use_ssl)
-            candidate.connect()
             signature = self.config.load_signature()
             if signature:
                 candidate.set_signature(signature)
@@ -113,9 +136,9 @@ class EmailClient:
     def _test_protocol(self, protocol: str) -> dict:
         try:
             if protocol == "imap":
-                self._imap()
+                self._imap().connect()
             else:
-                self._smtp()
+                self._smtp().connect()
             return {"ok": True, "code": None, "message": f"{protocol.upper()} connection succeeded"}
         except EmailClientError as exc:
             return {"ok": False, "code": exc.code, "message": str(exc)}

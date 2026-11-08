@@ -5,6 +5,7 @@ from .config import Config, get_default_config_dir, get_default_download_dir
 from .errors import (
     AuthenticationError,
     ConfigurationError,
+    DeliveryError,
     EmailClientError,
     InvalidArgumentError,
     NotFoundError,
@@ -17,6 +18,7 @@ __all__ = [
     "AuthenticationError",
     "Config",
     "ConfigurationError",
+    "DeliveryError",
     "Email",
     "EmailClient",
     "EmailClientError",
