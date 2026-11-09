@@ -29,4 +29,4 @@ __all__ = [
     "get_default_config_dir",
     "get_default_download_dir",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

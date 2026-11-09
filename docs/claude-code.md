@@ -16,7 +16,7 @@ claude plugin install python-email-mcp@fucose-plugins
 
 ## 安装已发布版本
 
-`v0.2.0` 已发布，可将 marketplace 固定到该 Git ref，再安装插件。
+`v0.2.0` 于 2026-11-09 重新发布，可将 marketplace 固定到该 Git ref，再安装插件。已有旧版 tag 或插件快照时，先按[更新说明](installation.md#选择安装来源与更新)刷新安装来源。
 
 ```powershell
 claude plugin marketplace add Fucose/python-email-mcp#v0.2.0
@@ -29,4 +29,4 @@ Claude Code 支持通过 `#ref` 将 GitHub marketplace 固定到分支或 tag。
 
 按[安装指南](installation.md)在 MCP server 所在主机配置邮箱。Claude Code 可能会给 MCP 工具名添加平台前缀。请按[共享 Skill](../skills/email-assistant/SKILL.md) 中的功能名称选择工具。
 
-执行附件下载或发送邮件时，先检查 Claude Code 的工具审批提示。客户端提示和 Skill 的操作确认是两层要求。即使将客户端策略设置为允许调用，也必须保留文件写入、发送和回复前的用户确认。
+对 `download_attachments`、`batch_download_attachments`、`send_email` 和 `reply_email` 保留宿主工具审批，并完成共享 Skill 中针对本次操作的用户确认。更新后重新加载插件，确认工具目录包含 `preview_email` 和 `preview_reply`，发送和回复按共享工作流携带 `preview_id`。

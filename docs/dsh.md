@@ -19,7 +19,7 @@ plugin_manager install_bundle target = /path/to/python-email-mcp/integrations/ds
 
 安装完成后，插件管理器和设置页会按 `locale/en.json`、`locale/zh.json` 与 `icon.svg` 显示标题、描述和图标。修改 `cordis.patch.yml` 后需要重启 Harness，或重新加载该行，补丁才会生效。
 
-Harness 从安装目录建立链接，因此 `git pull` 更新 checkout 后无需重新安装；变化的只有 Python 代码与 Skill 正文。若 `package.json` 或补丁本身变化，重新安装一次更稳妥。
+Harness 从安装目录建立链接，更新 checkout 后会使用其中的 Python 代码与 Skill。更新后重启 Harness，或重新加载 MCP 与 Skill provider，让进程和工具目录读取新内容。若 `package.json` 或补丁本身变化，重新安装 bundle。
 
 ## checkout 路径
 
@@ -59,8 +59,9 @@ Windows 与 WSL 是两个独立主机，各自需要 `uv`、setup 和插件安�
 1. 调用 `get_configuration_status`，确认 `configured: true` 且没有缺失字段。
 2. 调用 `test_connection`，确认 IMAP 与 SMTP 都成功。
 3. 在 Skill 目录中确认 `email-assistant` 来自本仓库。
+4. 确认工具目录包含 `preview_email` 和 `preview_reply`，发送和回复的参数包含必填 `preview_id`。
 
-工具审批取决于 Harness 的会话策略。即使客户端策略允许直接调用，下载、发送与回复前仍要遵守共享 [Skill](../skills/email-assistant/SKILL.md) 要求的明确确认。
+对 `download_attachments`、`batch_download_attachments`、`send_email` 和 `reply_email` 保留 Harness 的工具审批，并完成共享 [Skill](../skills/email-assistant/SKILL.md) 要求的明确确认。
 
 ## 手动合并
 

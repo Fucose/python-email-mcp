@@ -24,4 +24,4 @@ The server verifies that the prepared message matches `preview_id`. Host tool ap
 
 Check the tool result after every call that reads, writes, downloads, or sends. Distinguish a successful result from an attempted call, a failure envelope, or an ambiguous response. Do not claim a message was sent or a file was written without the corresponding success result.
 
-SMTP success means the server accepted the message for every recipient. On `delivery_failed`, inspect `error.details.accepted`, `rejected`, and `unknown`. Report partial acceptance or uncertainty explicitly. Before retrying, reconcile accepted and unknown recipients with the user to avoid duplicate mail.
+SMTP success means the server accepted the message for every recipient. Delivery or reading confirmation requires corresponding evidence from the mail service. On `delivery_failed`, inspect `error.details.status` and its `accepted`, `rejected`, and `unknown` recipients. The failure status is `partial`, `rejected`, or `unknown`. Report partial acceptance or uncertainty explicitly. Before retrying, reconcile accepted and unknown recipients with the user to avoid duplicate mail.

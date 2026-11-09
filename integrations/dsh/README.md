@@ -28,6 +28,10 @@ The plugin manager links the directory into the profile and loads
 `cordis.patch.yml`. Restart the Harness, or reload the plugin row, to apply
 changes to the patch.
 
+After updating Python code or the shared Skill, restart the Harness or reload
+the MCP and Skill provider rows so their processes and tool catalog use the
+updated checkout.
+
 ## Checkout path
 
 The patch resolves the checkout path when it loads, in this order:
@@ -52,6 +56,12 @@ so it is not affected by the MCP client's environment scrubbing.
 1. `get_configuration_status` returns `configured: true` and no missing fields.
 2. `test_connection` succeeds for IMAP and SMTP.
 3. The Skill catalog lists `email-assistant` from this repository.
+4. The tool catalog lists `preview_email` and `preview_reply`, and the sending
+   tools require `preview_id`.
+
+Keep host approval enabled for `download_attachments`,
+`batch_download_attachments`, `send_email`, and `reply_email`, and follow the
+shared Skill's action-specific confirmation workflow.
 
 Mailbox configuration lives outside the checkout. See
 [installation.md](../../docs/installation.md) and [dsh.md](../../docs/dsh.md).
